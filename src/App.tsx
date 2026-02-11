@@ -306,7 +306,12 @@ export function App() {
   };
 
   const fetchTeams = async (lId: string) => {
-    const { data: teams } = await supabase.from('teams').select('*, players(id, name)').eq('lobby_id', lId).order('name');
+    // UPDATED: Now fetches 'purchases' so we can see the army live
+    const { data: teams } = await supabase
+        .from('teams')
+        .select('*, players(id, name), purchases(item_id)')
+        .eq('lobby_id', lId)
+        .order('name');
     if (teams) setLobbyTeams(teams);
   };
 
@@ -345,10 +350,11 @@ export function App() {
       return () => { supabase.removeChannel(ch); };
     }
     if ((view === 'moderator' || view === 'select-team') && foundLobby) {
-      fetchAdminState(); // Initial fetch
+      fetchAdminState(); 
       const ch = supabase.channel('admin')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, () => fetchTeams(foundLobby.id))
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => fetchTeams(foundLobby.id)) // Added teams listener for budget updates
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => fetchTeams(foundLobby.id))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'purchases' }, () => fetchTeams(foundLobby.id)) // UPDATED: Listen for buys
         .subscribe();
       return () => { supabase.removeChannel(ch); };
     }
@@ -568,15 +574,44 @@ export function App() {
           <button onClick={handleNuke} className="bg-red-600 hover:bg-red-500 px-6 py-2 rounded-lg font-bold flex items-center gap-2"><Trash2 size={18}/> DELETE LOBBY</button>
         </header>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {lobbyTeams.map(team => (
-            <div key={team.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-              <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-bold">{team.name}</h2><div className="bg-black px-4 py-2 rounded-lg border border-slate-700 font-mono text-yellow-500 text-xl font-bold">{team.budget} <Coins className="inline w-4 h-4"/></div></div>
-              <div className="space-y-3 mb-8">
-                {team.players?.map((p:any, i:number) => <div key={i} className="flex items-center justify-between bg-slate-800 p-3 rounded-lg border border-slate-700"><div className="flex items-center gap-3"><div className="w-3 h-3 bg-green-500 rounded-full"/> <span className="font-bold">{p.name}</span></div><div className="flex gap-2"><button onClick={() => handleSwitch(p.id, team.name)} className="p-2 hover:bg-slate-600 rounded text-blue-400"><ArrowRightLeft size={18}/></button><button onClick={() => handleKick(p.id)} className="p-2 hover:bg-slate-600 rounded text-red-500"><Trash2 size={18}/></button></div></div>)}
+          {lobbyTeams.map(team => {
+            // -- LIVE ARMY CALC --
+            const teamItems = team.purchases || [];
+            const counts: any = {};
+            teamItems.forEach((p:any) => counts[p.item_id] = (counts[p.item_id] || 0) + 1);
+            const uniqueIds = Object.keys(counts);
+
+            return (
+              <div key={team.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-bold">{team.name}</h2><div className="bg-black px-4 py-2 rounded-lg border border-slate-700 font-mono text-yellow-500 text-xl font-bold">{team.budget} <Coins className="inline w-4 h-4"/></div></div>
+                <div className="space-y-3 mb-8">
+                  {team.players?.map((p:any, i:number) => <div key={i} className="flex items-center justify-between bg-slate-800 p-3 rounded-lg border border-slate-700"><div className="flex items-center gap-3"><div className="w-3 h-3 bg-green-500 rounded-full"/> <span className="font-bold">{p.name}</span></div><div className="flex gap-2"><button onClick={() => handleSwitch(p.id, team.name)} className="p-2 hover:bg-slate-600 rounded text-blue-400"><ArrowRightLeft size={18}/></button><button onClick={() => handleKick(p.id)} className="p-2 hover:bg-slate-600 rounded text-red-500"><Trash2 size={18}/></button></div></div>)}
+                </div>
+                
+                {/* LIVE ARMY SECTION */}
+                <div className="mt-4 border-t border-slate-800 pt-4">
+                    <h4 className="text-xs font-bold text-slate-500 mb-2">LIVE ARMY</h4>
+                    <div className="flex flex-wrap gap-1">
+                       {uniqueIds.map(id => {
+                          const item = dbItems.find(i => i.id === id);
+                          if(!item) return null;
+                          return (
+                              <div key={id} className="relative w-8 h-8 bg-slate-800 rounded border border-slate-700" title={item.name}>
+                                  <img src={getImageUrl(item.name, item.type, item.hero)} className="w-full h-full object-contain p-0.5"/>
+                                  <div className="absolute -top-1 -right-1 bg-yellow-500 text-black text-[8px] font-bold w-3 h-3 flex items-center justify-center rounded-full border border-black">
+                                      {counts[id]}
+                                  </div>
+                              </div>
+                          )
+                       })}
+                       {uniqueIds.length === 0 && <span className="text-xs text-slate-700 italic">No troops bought yet.</span>}
+                    </div>
+                </div>
+
+                <button onClick={() => handleReset(team.id)} className="w-full mt-6 bg-slate-800 hover:bg-red-900/30 text-red-400 border border-slate-700 py-4 rounded-xl font-bold flex justify-center gap-2 transition-all"><RefreshCw/> RESET {team.name.toUpperCase()}</button>
               </div>
-              <button onClick={() => handleReset(team.id)} className="w-full bg-slate-800 hover:bg-red-900/30 text-red-400 border border-slate-700 py-4 rounded-xl font-bold flex justify-center gap-2 transition-all"><RefreshCw/> RESET {team.name.toUpperCase()}</button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
