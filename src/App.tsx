@@ -502,41 +502,46 @@ export function App() {
     window.open(`https://link.clashofclans.com/en?action=CopyArmy&army=u${uStr}-s${sStr}-${hStr}`, '_blank');
   };
 
-  // --- TICKER LOGIC (FIXED) ---
+  // --- TICKER LOGIC (TEAM COLORED) ---
   const getTickerItems = () => {
-    const itemMap = new Map();
+    const allItems: any[] = [];
     
-    lobbyTeams.forEach(team => {
-        // 1. Gather ALL purchases from ALL players in this team
-        const allTeamPurchases: any[] = [];
+    lobbyTeams.forEach((team, index) => {
+        // 1. Get all purchases for this specific team
+        const teamPurchases: any[] = [];
         if (team.players) {
             team.players.forEach((p: any) => {
-                if (p.purchases) allTeamPurchases.push(...p.purchases);
+                if (p.purchases) teamPurchases.push(...p.purchases);
             });
         }
 
-        // 2. Count items to determine inflation
+        // 2. Count them
         const counts: any = {};
-        allTeamPurchases.forEach((p:any) => counts[p.item_id] = (counts[p.item_id] || 0) + 1);
+        teamPurchases.forEach((p:any) => counts[p.item_id] = (counts[p.item_id] || 0) + 1);
         
-        // 3. Calculate current price based on inflation count
+        // 3. Create ticker objects
         Object.keys(counts).forEach(itemId => {
             const item = dbItems.find(i => i.id === itemId);
             if(item) {
                 const count = counts[itemId];
-                const price = item.base_price + (count * 2); // Base + Inflation
+                const price = item.base_price + (count * 2);
                 
-                // Keep the highest price seen across teams
-                const existing = itemMap.get(itemId);
-                if(!existing || price > existing.price) {
-                    itemMap.set(itemId, { name: item.name, price, type: item.type });
-                }
+                // Determine Color (Team 1 = Cyan, Team 2 = Red)
+                const colorClass = index === 0 ? "text-cyan-400" : "text-red-500";
+                
+                allItems.push({
+                    name: item.name,
+                    price: price,
+                    teamName: team.name,
+                    color: colorClass,
+                    id: itemId + team.id // Unique key for React
+                });
             }
         });
     });
 
-    // Sort by most expensive first
-    return Array.from(itemMap.values()).sort((a, b) => b.price - a.price).slice(0, 20);
+    // 4. Sort everything by price (High to Low) and take top 25
+    return allItems.sort((a, b) => b.price - a.price).slice(0, 25);
   };
   // --- RENDER HELPERS ---
   const renderPlayerArmy = (p: any, isLarge = false) => {
@@ -741,8 +746,9 @@ export function App() {
         <div className="ticker-wrap">
             <div className="ticker-content">
                 {tickerItems.map((item:any, i:number) => (
-                    <div key={i} className="ticker-item">
-                        {item.name.toUpperCase()}: <span className="text-green-400">{item.price}g</span> 
+                    <div key={i} className={`ticker-item ${item.color}`}>
+                        <span className="text-white text-sm mr-1 opacity-50">[{item.teamName}]</span>
+                        {item.name.toUpperCase()}: {item.price}g
                         <span className="text-slate-500 ml-2 text-sm">▲</span>
                     </div>
                 ))}
