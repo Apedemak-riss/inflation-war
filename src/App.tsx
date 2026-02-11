@@ -248,6 +248,7 @@ export function App() {
   const [teamPurchases, setTeamPurchases] = useState<any[]>([]);
   const [myPurchases, setMyPurchases] = useState<any[]>([]);
   const [isSeeding, setIsSeeding] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false); // <--- NEW: Lock state
   
   // Referee State
   const [refLinks, setRefLinks] = useState(['', '', '']);
@@ -306,7 +307,6 @@ export function App() {
   };
 
   const fetchTeams = async (lId: string) => {
-    // UPDATED: Now fetches 'purchases' so we can see the army live
     const { data: teams } = await supabase
         .from('teams')
         .select('*, players(id, name), purchases(item_id)')
@@ -332,7 +332,7 @@ export function App() {
     setPlayerId(p.id); setTeamId(tIdData!.id); setTeamName(tName); setView('game');
   };
 
-// --- REALTIME ---
+  // --- REALTIME ---
   useEffect(() => {
     // 1. GAME VIEW LISTENER (My Player & My Team)
     if (view === 'game' && teamId) {
@@ -364,13 +364,11 @@ export function App() {
   }, [view, teamId, foundLobby, playerId]);
 
   // 3. DOOMSDAY LISTENER (Global Lobby Nuke Check)
-  // This watches if the lobby is deleted and kicks everyone out immediately
   useEffect(() => {
     if (foundLobby) {
       const lobbyCh = supabase.channel('lobby-watch')
         .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'lobbies', filter: `id=eq.${foundLobby.id}` }, () => {
           alert("Lobby closed by Moderator.");
-          // Force reset all states
           setView('login');
           setFoundLobby(null);
           setLobbyTeams([]);
@@ -407,8 +405,7 @@ export function App() {
   const handleNuke = async () => { 
       if(confirm("DELETE LOBBY? This cannot be undone.")) { 
           await supabase.rpc('delete_lobby', { p_lobby_id: foundLobby.id }); 
-          alert("Lobby Deleted.");
-          setView('login');
+          // Doomsday listener handles the redirect
       } 
   };
   const handleLeave = async () => { if(confirm("Leave match?")) await supabase.rpc('leave_team', { p_player_id: playerId }); };
@@ -425,40 +422,53 @@ export function App() {
     return s;
   }, 0);
 
-  // Helper to count currently active heroes for the player
   const getActiveHeroCount = () => {
     const heroItems = myPurchases.map(p => dbItems.find(i => i.id === p.item_id)).filter(i => i?.type === 'equipment');
     return new Set(heroItems.map(i => i?.hero)).size;
   };
 
   const handleBuy = async (item: Item) => {
+    if (isProcessing) return; // Prevent double clicks
+
     let cat: any = 'troop';
     if (item.type === 'spell') cat = 'spell'; else if (item.type === 'siege') cat = 'siege'; else if (item.type === 'equipment') cat = 'equipment';
+    
+    // 1. Strict Local Check (Fast)
     if (cat !== 'equipment') {
       const current = getCurrentWeight(cat);
       if (current + item.housing_space > LIMITS[cat as keyof typeof LIMITS]) return alert("Full Capacity!");
     } else {
-        // Equipment Checks
         const heroEqCount = myPurchases.filter(p => {
             const i = dbItems.find(x => x.id === p.item_id);
             return i?.hero === item.hero;
         }).length;
-        
         if (heroEqCount >= 2) return alert(`You already have 2 items for ${item.hero}!`);
-        
-        // If this is the FIRST item for this hero, we need to check if we already have 4 heroes active
         if (heroEqCount === 0) {
             const activeHeroes = getActiveHeroCount();
             if (activeHeroes >= 4) return alert("You can only equip 4 Heroes maximum!");
         }
     }
+
     const price = calcPrice(item.base_price, item.id);
     if (teamBudget < price) return alert("No Budget!");
+
+    // 2. Lock UI
+    setIsProcessing(true);
+
     const mockId = Math.random().toString();
     setMyPurchases(prev => [...prev, { item_id: item.id, player_id: playerId, id: mockId }]);
+
+    // 3. Server Check (Authoritative)
     const { data, error } = await supabase.rpc('buy_item', { p_player_id: playerId, p_item_id: item.id });
-    if (error || (data && !data.success)) setMyPurchases(prev => prev.filter(x => x.id !== mockId));
+
+    if (error || (data && !data.success)) {
+        // Revert if server says NO
+        setMyPurchases(prev => prev.filter(x => x.id !== mockId));
+        if (data?.message) alert(data.message); // Show specific error from SQL (e.g. "Troop limit reached")
+    }
+    
     fetchGameState();
+    setIsProcessing(false); // Unlock
   };
 
   const handleSell = async (item: Item) => {
@@ -471,14 +481,8 @@ export function App() {
     const active = myPurchases.map(p => dbItems.find(i => i.id === p.item_id)).filter(Boolean) as Item[];
     const counts: any = {}; active.forEach(i => counts[i.id] = (counts[i.id] || 0) + 1);
     const unique = Array.from(new Map(active.map(i => [i.id, i])).values());
-    
-    // FIX: Generate Short IDs for Link
-    const uStr = unique.filter(i => ['troop','siege','super_troop'].includes(i.type))
-      .map(i => `${counts[i.id]}x${i.coc_id % 1000000}`).join('-');
-      
-    const sStr = unique.filter(i => i.type === 'spell')
-      .map(i => `${counts[i.id]}x${i.coc_id % 1000000}`).join('-');
-      
+    const uStr = unique.filter(i => ['troop','siege','super_troop'].includes(i.type)).map(i => `${counts[i.id]}x${i.coc_id % 1000000}`).join('-');
+    const sStr = unique.filter(i => i.type === 'spell').map(i => `${counts[i.id]}x${i.coc_id % 1000000}`).join('-');
     const hG: any = {}; active.filter(i => i.type === 'equipment').forEach(e => { if(e.hero){ hG[e.hero] = hG[e.hero] || []; hG[e.hero].push(e.coc_id); }});
     const hStr = Object.keys(hG).sort((a,b) => HERO_LINK_IDS[a]-HERO_LINK_IDS[b]).map((k,i) => (i===0?'h':'')+`${HERO_LINK_IDS[k]}e${hG[k].join('_')}`).join('-');
     window.open(`https://link.clashofclans.com/en?action=CopyArmy&army=u${uStr}-s${sStr}-${hStr}`, '_blank');
@@ -522,33 +526,21 @@ export function App() {
         const p = calcPrice(i.base_price, i.id);
         const qty = myPurchases.filter(x => x.item_id === i.id).length;
         const isOwned = i.type === 'equipment' && qty > 0;
-        
-        // --- NEW STYLE LOGIC ---
-        const borderClass = (qty > 0 || isOwned) 
-           ? 'border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.2)] scale-[1.02]' 
-           : 'border-slate-700 hover:border-yellow-500 hover:scale-[1.05] hover:shadow-lg';
-        
+        const borderClass = (qty > 0 || isOwned) ? 'border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.2)] scale-[1.02]' : 'border-slate-700 hover:border-yellow-500 hover:scale-[1.05] hover:shadow-lg';
         return (
            <div key={i.id} className={`bg-slate-800 rounded-xl border p-3 relative transition-all duration-200 ease-out ${borderClass}`}>
-                {i.hero && (
-                   <div className="absolute top-2 left-2 z-10 w-10 h-10 rounded-full border border-black overflow-hidden bg-slate-900 shadow-md">
-                      <img src={`/${i.hero.toLowerCase()}.png`} className="w-full h-full object-cover" alt={i.hero}/>
-                   </div>
-                )}
+                {i.hero && (<div className="absolute top-2 left-2 z-10 w-10 h-10 rounded-full border border-black overflow-hidden bg-slate-900 shadow-md"><img src={`/${i.hero.toLowerCase()}.png`} className="w-full h-full object-cover" alt={i.hero}/></div>)}
                 <div className="aspect-square bg-slate-900 rounded mb-2 relative overflow-hidden">
                    <img src={getImageUrl(i.name, i.type, i.hero)} className="w-full h-full object-contain p-1" />
                    {qty > 0 && i.type !== 'equipment' && <div className="absolute top-0 right-0 bg-yellow-500 text-black px-1 rounded-bl font-bold shadow-md">x{qty}</div>}
                    {isOwned && <div className="absolute top-0 right-0 bg-green-500 text-black w-7 h-7 rounded-bl-lg flex items-center justify-center font-bold shadow-lg"><Check size={16}/></div>}
                 </div>
-                {/* NAME LABEL */}
-                <div className="text-center font-bold text-sm h-10 leading-tight mb-2 flex items-center justify-center">
-                    {i.name}
-                </div>
+                <div className="text-center font-bold text-sm h-10 leading-tight mb-2 flex items-center justify-center">{i.name}</div>
                 <div className="flex justify-between items-center">
                     <span className="text-green-400 font-bold flex items-center gap-1">{p}<Coins size={12}/></span>
                     <div className="flex gap-1">
                         {qty > 0 && <button onClick={()=>handleSell(i)} className="bg-red-900/50 hover:bg-red-600 p-1.5 rounded transition-colors"><Minus size={14}/></button>}
-                        <button onClick={()=>handleBuy(i)} disabled={teamBudget<p} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-30 p-1.5 rounded transition-colors"><ShoppingCart size={14}/></button>
+                        <button onClick={()=>handleBuy(i)} disabled={teamBudget<p || isProcessing} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-30 p-1.5 rounded transition-colors"><ShoppingCart size={14}/></button>
                     </div>
                 </div>
             </div>
@@ -600,20 +592,16 @@ export function App() {
         </header>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           {lobbyTeams.map(team => {
-            // -- LIVE ARMY CALC --
             const teamItems = team.purchases || [];
             const counts: any = {};
             teamItems.forEach((p:any) => counts[p.item_id] = (counts[p.item_id] || 0) + 1);
             const uniqueIds = Object.keys(counts);
-
             return (
               <div key={team.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
                 <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-bold">{team.name}</h2><div className="bg-black px-4 py-2 rounded-lg border border-slate-700 font-mono text-yellow-500 text-xl font-bold">{team.budget} <Coins className="inline w-4 h-4"/></div></div>
                 <div className="space-y-3 mb-8">
                   {team.players?.map((p:any, i:number) => <div key={i} className="flex items-center justify-between bg-slate-800 p-3 rounded-lg border border-slate-700"><div className="flex items-center gap-3"><div className="w-3 h-3 bg-green-500 rounded-full"/> <span className="font-bold">{p.name}</span></div><div className="flex gap-2"><button onClick={() => handleSwitch(p.id, team.name)} className="p-2 hover:bg-slate-600 rounded text-blue-400"><ArrowRightLeft size={18}/></button><button onClick={() => handleKick(p.id)} className="p-2 hover:bg-slate-600 rounded text-red-500"><Trash2 size={18}/></button></div></div>)}
                 </div>
-                
-                {/* LIVE ARMY SECTION */}
                 <div className="mt-4 border-t border-slate-800 pt-4">
                     <h4 className="text-xs font-bold text-slate-500 mb-2">LIVE ARMY</h4>
                     <div className="flex flex-wrap gap-1">
@@ -623,16 +611,13 @@ export function App() {
                           return (
                               <div key={id} className="relative w-8 h-8 bg-slate-800 rounded border border-slate-700" title={item.name}>
                                   <img src={getImageUrl(item.name, item.type, item.hero)} className="w-full h-full object-contain p-0.5"/>
-                                  <div className="absolute -top-1 -right-1 bg-yellow-500 text-black text-[8px] font-bold w-3 h-3 flex items-center justify-center rounded-full border border-black">
-                                      {counts[id]}
-                                  </div>
+                                  <div className="absolute -top-1 -right-1 bg-yellow-500 text-black text-[8px] font-bold w-3 h-3 flex items-center justify-center rounded-full border border-black">{counts[id]}</div>
                               </div>
                           )
                        })}
                        {uniqueIds.length === 0 && <span className="text-xs text-slate-700 italic">No troops bought yet.</span>}
                     </div>
                 </div>
-
                 <button onClick={() => handleReset(team.id)} className="w-full mt-6 bg-slate-800 hover:bg-red-900/30 text-red-400 border border-slate-700 py-4 rounded-xl font-bold flex justify-center gap-2 transition-all"><RefreshCw/> RESET {team.name.toUpperCase()}</button>
               </div>
             );
@@ -697,7 +682,6 @@ export function App() {
         <main className="p-6 max-w-6xl mx-auto space-y-12">
             <div>
               <h2 className="text-2xl font-bold mb-6 flex gap-2 items-center"><Crown className="text-yellow-500"/> HERO EQUIPMENT</h2>
-              {/* SUBSECTIONS FOR HEROES */}
               {['BK','AQ','GW','RC','MP'].map(h => {
                 const hItems = dbItems.filter(i => i.hero === h);
                 if (hItems.length === 0) return null;
