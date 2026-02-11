@@ -332,8 +332,9 @@ export function App() {
     setPlayerId(p.id); setTeamId(tIdData!.id); setTeamName(tName); setView('game');
   };
 
-  // --- REALTIME ---
+// --- REALTIME ---
   useEffect(() => {
+    // 1. GAME VIEW LISTENER (My Player & My Team)
     if (view === 'game' && teamId) {
       fetchGameState();
       const ch = supabase.channel('game')
@@ -349,16 +350,40 @@ export function App() {
         .subscribe();
       return () => { supabase.removeChannel(ch); };
     }
+
+    // 2. LOBBY VIEW LISTENER (Moderator / Select Team)
     if ((view === 'moderator' || view === 'select-team') && foundLobby) {
       fetchAdminState(); 
       const ch = supabase.channel('admin')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, () => fetchTeams(foundLobby.id))
         .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => fetchTeams(foundLobby.id))
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'purchases' }, () => fetchTeams(foundLobby.id)) // UPDATED: Listen for buys
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'purchases' }, () => fetchTeams(foundLobby.id))
         .subscribe();
       return () => { supabase.removeChannel(ch); };
     }
   }, [view, teamId, foundLobby, playerId]);
+
+  // 3. DOOMSDAY LISTENER (Global Lobby Nuke Check)
+  // This watches if the lobby is deleted and kicks everyone out immediately
+  useEffect(() => {
+    if (foundLobby) {
+      const lobbyCh = supabase.channel('lobby-watch')
+        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'lobbies', filter: `id=eq.${foundLobby.id}` }, () => {
+          alert("Lobby closed by Moderator.");
+          // Force reset all states
+          setView('login');
+          setFoundLobby(null);
+          setLobbyTeams([]);
+          setPlayerId(null);
+          setTeamId(null);
+          setTeamPurchases([]);
+          setMyPurchases([]);
+        })
+        .subscribe();
+
+      return () => { supabase.removeChannel(lobbyCh); };
+    }
+  }, [foundLobby]);
 
   const fetchGameState = async () => {
     const { data: t } = await supabase.from('teams').select('budget').eq('id', teamId!).single();
