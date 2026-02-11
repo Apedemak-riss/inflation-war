@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { Shield, Sword, ShoppingCart, Coins, ExternalLink, Hammer, Crown, Minus, Check, Users, RefreshCw, Trash2, Trophy, ArrowRightLeft, LogOut, Gavel, ClipboardCheck, AlertTriangle, Loader2 } from 'lucide-react';
+import { Shield, Sword, ShoppingCart, Coins, ExternalLink, Hammer, Crown, Minus, Check, Users, RefreshCw, Trash2, Trophy, ArrowRightLeft, LogOut, Gavel, ClipboardCheck, AlertTriangle, Loader2, Edit2, Save, X, Tv } from 'lucide-react';
 
 // --- CONFIGURATION ---
 const ADMIN_PREFIX = "op:"; 
+const STREAMER_PREFIX = "streamer:";
 const HERO_LINK_IDS: Record<string, number> = { BK: 0, AQ: 1, GW: 2, RC: 4, MP: 6 };
 const LIMITS = { troop: 340, siege: 3, spell: 11 };
 
@@ -13,7 +14,7 @@ const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 // --- TYPES ---
-type View = 'login' | 'select-team' | 'game' | 'moderator' | 'referee';
+type View = 'login' | 'select-team' | 'game' | 'moderator' | 'streamer' | 'referee';
 type ItemType = 'troop' | 'siege' | 'spell' | 'super_troop' | 'equipment';
 type HeroType = 'BK' | 'AQ' | 'GW' | 'RC' | 'MP' | null;
 
@@ -241,14 +242,19 @@ export function App() {
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [teamId, setTeamId] = useState<string | null>(null);
   const [teamName, setTeamName] = useState('');
+  const [editingTeamId, setEditingTeamId] = useState<string | null>(null);
+  const [tempTeamName, setTempTeamName] = useState('');
   
+  // Streamer Features
+  const [focusedPlayer, setFocusedPlayer] = useState<any>(null); // <--- NEW: Zoom state
+
   // Game
   const [teamBudget, setTeamBudget] = useState(100);
   const [dbItems, setDbItems] = useState<Item[]>([]);
   const [teamPurchases, setTeamPurchases] = useState<any[]>([]);
   const [myPurchases, setMyPurchases] = useState<any[]>([]);
   const [isSeeding, setIsSeeding] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false); // <--- NEW: Lock state
+  const [isProcessing, setIsProcessing] = useState(false);
   
   // Referee State
   const [refLinks, setRefLinks] = useState(['', '', '']);
@@ -289,9 +295,13 @@ export function App() {
       if (suffix === 'referee') { setView('referee'); return; }
       mode = 'moderator';
       code = code.substring(ADMIN_PREFIX.length).toUpperCase();
+    } else if (code.toLowerCase().startsWith(STREAMER_PREFIX.toLowerCase())) {
+      mode = 'streamer';
+      code = code.substring(STREAMER_PREFIX.length).toUpperCase();
     } else {
       code = code.toUpperCase();
     }
+    
     setLobbyCode(code);
     let { data: lobby } = await supabase.from('lobbies').select('*').eq('code', code).single();
     if (mode === 'moderator' && !lobby) {
@@ -309,7 +319,7 @@ export function App() {
   const fetchTeams = async (lId: string) => {
     const { data: teams } = await supabase
         .from('teams')
-        .select('*, players(id, name), purchases(item_id)')
+        .select('*, players(id, name, purchases(item_id))')
         .eq('lobby_id', lId)
         .order('name');
     if (teams) setLobbyTeams(teams);
@@ -334,11 +344,15 @@ export function App() {
 
   // --- REALTIME ---
   useEffect(() => {
-    // 1. GAME VIEW LISTENER (My Player & My Team)
     if (view === 'game' && teamId) {
       fetchGameState();
       const ch = supabase.channel('game')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'teams', filter: `id=eq.${teamId}` }, p => { if(p.new?.budget !== undefined) setTeamBudget(p.new.budget); })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'teams', filter: `id=eq.${teamId}` }, p => { 
+            if(p.new) {
+                if (p.new.budget !== undefined) setTeamBudget(p.new.budget);
+                if (p.new.name) setTeamName(p.new.name);
+            }
+        })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'purchases', filter: `team_id=eq.${teamId}` }, () => fetchGameState())
         .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'players', filter: `id=eq.${playerId}` }, () => { alert("Kicked."); setView('login'); setPlayerId(null); setTeamId(null); })
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'players', filter: `id=eq.${playerId}` }, async (payload) => {
@@ -351,8 +365,7 @@ export function App() {
       return () => { supabase.removeChannel(ch); };
     }
 
-    // 2. LOBBY VIEW LISTENER (Moderator / Select Team)
-    if ((view === 'moderator' || view === 'select-team') && foundLobby) {
+    if ((view === 'moderator' || view === 'select-team' || view === 'streamer') && foundLobby) {
       fetchAdminState(); 
       const ch = supabase.channel('admin')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, () => fetchTeams(foundLobby.id))
@@ -363,7 +376,6 @@ export function App() {
     }
   }, [view, teamId, foundLobby, playerId]);
 
-  // 3. DOOMSDAY LISTENER (Global Lobby Nuke Check)
   useEffect(() => {
     if (foundLobby) {
       const lobbyCh = supabase.channel('lobby-watch')
@@ -405,10 +417,17 @@ export function App() {
   const handleNuke = async () => { 
       if(confirm("DELETE LOBBY? This cannot be undone.")) { 
           await supabase.rpc('delete_lobby', { p_lobby_id: foundLobby.id }); 
-          // Doomsday listener handles the redirect
       } 
   };
   const handleLeave = async () => { if(confirm("Leave match?")) await supabase.rpc('leave_team', { p_player_id: playerId }); };
+  
+  const handleRenameTeam = async (tId: string) => {
+      if(!tempTeamName.trim()) return;
+      const { error } = await supabase.rpc('moderator_rename_team', { p_team_id: tId, p_new_name: tempTeamName });
+      if (error) { console.error(error); alert("Rename failed: " + error.message); return; }
+      setEditingTeamId(null);
+      fetchTeams(foundLobby.id);
+  }
 
   // --- GAME ACTIONS ---
   const calcPrice = (base: number, id: string) => base + (teamPurchases.filter(p => p.item_id === id).length * 2);
@@ -428,12 +447,11 @@ export function App() {
   };
 
   const handleBuy = async (item: Item) => {
-    if (isProcessing) return; // Prevent double clicks
+    if (isProcessing) return;
 
     let cat: any = 'troop';
     if (item.type === 'spell') cat = 'spell'; else if (item.type === 'siege') cat = 'siege'; else if (item.type === 'equipment') cat = 'equipment';
     
-    // 1. Strict Local Check (Fast)
     if (cat !== 'equipment') {
       const current = getCurrentWeight(cat);
       if (current + item.housing_space > LIMITS[cat as keyof typeof LIMITS]) return alert("Full Capacity!");
@@ -452,23 +470,19 @@ export function App() {
     const price = calcPrice(item.base_price, item.id);
     if (teamBudget < price) return alert("No Budget!");
 
-    // 2. Lock UI
     setIsProcessing(true);
-
     const mockId = Math.random().toString();
     setMyPurchases(prev => [...prev, { item_id: item.id, player_id: playerId, id: mockId }]);
 
-    // 3. Server Check (Authoritative)
     const { data, error } = await supabase.rpc('buy_item', { p_player_id: playerId, p_item_id: item.id });
 
     if (error || (data && !data.success)) {
-        // Revert if server says NO
         setMyPurchases(prev => prev.filter(x => x.id !== mockId));
-        if (data?.message) alert(data.message); // Show specific error from SQL (e.g. "Troop limit reached")
+        if (data?.message) alert(data.message);
     }
     
     fetchGameState();
-    setIsProcessing(false); // Unlock
+    setIsProcessing(false);
   };
 
   const handleSell = async (item: Item) => {
@@ -486,6 +500,83 @@ export function App() {
     const hG: any = {}; active.filter(i => i.type === 'equipment').forEach(e => { if(e.hero){ hG[e.hero] = hG[e.hero] || []; hG[e.hero].push(e.coc_id); }});
     const hStr = Object.keys(hG).sort((a,b) => HERO_LINK_IDS[a]-HERO_LINK_IDS[b]).map((k,i) => (i===0?'h':'')+`${HERO_LINK_IDS[k]}e${hG[k].join('_')}`).join('-');
     window.open(`https://link.clashofclans.com/en?action=CopyArmy&army=u${uStr}-s${sStr}-${hStr}`, '_blank');
+  };
+
+  // --- TICKER LOGIC (FIXED) ---
+  const getTickerItems = () => {
+    const itemMap = new Map();
+    
+    lobbyTeams.forEach(team => {
+        // 1. Gather ALL purchases from ALL players in this team
+        const allTeamPurchases: any[] = [];
+        if (team.players) {
+            team.players.forEach((p: any) => {
+                if (p.purchases) allTeamPurchases.push(...p.purchases);
+            });
+        }
+
+        // 2. Count items to determine inflation
+        const counts: any = {};
+        allTeamPurchases.forEach((p:any) => counts[p.item_id] = (counts[p.item_id] || 0) + 1);
+        
+        // 3. Calculate current price based on inflation count
+        Object.keys(counts).forEach(itemId => {
+            const item = dbItems.find(i => i.id === itemId);
+            if(item) {
+                const count = counts[itemId];
+                const price = item.base_price + (count * 2); // Base + Inflation
+                
+                // Keep the highest price seen across teams
+                const existing = itemMap.get(itemId);
+                if(!existing || price > existing.price) {
+                    itemMap.set(itemId, { name: item.name, price, type: item.type });
+                }
+            }
+        });
+    });
+
+    // Sort by most expensive first
+    return Array.from(itemMap.values()).sort((a, b) => b.price - a.price).slice(0, 20);
+  };
+  // --- RENDER HELPERS ---
+  const renderPlayerArmy = (p: any, isLarge = false) => {
+      const myItems = p.purchases || []; 
+      
+      if (myItems.length === 0) return <div className={`${isLarge ? 'text-xl' : 'text-xs'} text-slate-600 italic mt-2`}>No items yet</div>;
+
+      const counts: any = {};
+      myItems.forEach((x:any) => counts[x.item_id] = (counts[x.item_id] || 0) + 1);
+      const active = myItems.map((x:any) => dbItems.find(i => i.id === x.item_id)).filter(Boolean);
+      const heroKeys = ['BK', 'AQ', 'GW', 'RC', 'MP'].filter(h => active.some((i:any) => i.hero === h));
+      const unique = Array.from(new Map(active.map((i:any) => [i.id, i])).values());
+
+      const heroImgClass = isLarge ? "w-20 h-20 border-4" : "w-5 h-5 border";
+      const equipImgClass = isLarge ? "w-14 h-14 bg-slate-900 border-2 p-1" : "w-4 h-4";
+      const itemBoxClass = isLarge ? "w-24 h-24 border-2 rounded-xl" : "w-6 h-6 border rounded";
+      const badgeClass = isLarge ? "w-8 h-8 text-sm -top-3 -right-3" : "w-2.5 h-2.5 text-[6px] -top-1 -right-1";
+
+      return (
+          <div className={`mt-2 space-y-2 ${isLarge ? 'space-y-6 mt-4' : ''}`}>
+              {heroKeys.length > 0 && <div className={`flex flex-wrap ${isLarge ? 'gap-6' : 'gap-2'} justify-center lg:justify-start`}>
+                  {heroKeys.map(h => (
+                      <div key={h} className={`bg-slate-900 rounded ${isLarge ? 'p-3' : 'p-1'} border border-slate-700 flex items-center ${isLarge ? 'gap-3' : 'gap-1'}`}>
+                          <img src={`/${h.toLowerCase()}.png`} className={`${heroImgClass} rounded-full border-yellow-600 object-cover`}/>
+                          {active.filter((i:any) => i.hero === h).map((eq:any, idx:number) => (
+                              <img key={idx} src={getImageUrl(eq.name, eq.type, eq.hero)} className={equipImgClass} title={eq.name}/>
+                          ))}
+                      </div>
+                  ))}
+              </div>}
+              <div className={`flex flex-wrap ${isLarge ? 'gap-3' : 'gap-1'} justify-center lg:justify-start`}>
+                  {unique.filter((i:any) => !i.hero).map((i:any) => (
+                      <div key={i.id} className={`relative ${itemBoxClass} bg-slate-800 border-slate-700`}>
+                           <img src={getImageUrl(i.name, i.type)} className="w-full h-full object-contain p-1" />
+                           <div className={`absolute bg-yellow-500 text-black font-bold flex items-center justify-center rounded-full border border-black ${badgeClass}`}>{counts[i.id]}</div>
+                      </div>
+                  ))}
+              </div>
+          </div>
+      )
   };
 
   // --- RENDERERS ---
@@ -583,45 +674,128 @@ export function App() {
     </div>
   );
 
+  if (view === 'streamer') {
+      const tickerItems = getTickerItems();
+      return (
+      <div className="min-h-screen bg-slate-950 text-white p-6 pb-20 overflow-hidden relative">
+        {/* CHANGED: animation duration from 30s to 60s */}
+        <style>{`
+          @keyframes marquee { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }
+          .ticker-wrap { position: fixed; bottom: 0; left: 0; width: 100%; height: 50px; background: #000; overflow: hidden; white-space: nowrap; z-index: 100; border-top: 2px solid #334155; display: flex; align-items: center; }
+          .ticker-content { display: inline-block; padding-left: 100%; animation: marquee 60s linear infinite; } 
+          .ticker-item { display: inline-block; padding: 0 2rem; font-family: monospace; font-size: 1.2rem; font-weight: bold; color: #fbbf24; }
+        `}</style>
+
+        {/* --- ZOOM MODAL --- */}
+        {focusedPlayer && (
+            <div className="fixed inset-0 bg-black/90 z-[200] flex items-center justify-center p-10 backdrop-blur-sm" onClick={() => setFocusedPlayer(null)}>
+                <div className="bg-slate-900 border-4 border-yellow-500 p-8 rounded-3xl shadow-2xl max-w-5xl w-full transform scale-110" onClick={e => e.stopPropagation()}>
+                    <div className="flex justify-between items-center border-b-2 border-slate-700 pb-4 mb-6">
+                        <h2 className="text-6xl font-black text-white">{focusedPlayer.name}</h2>
+                        <button onClick={() => setFocusedPlayer(null)} className="bg-red-600 hover:bg-red-500 text-white p-4 rounded-xl"><X size={32}/></button>
+                    </div>
+                    {/* Render with EXTRA LARGE flag */}
+                    {renderPlayerArmy(focusedPlayer, true)}
+                </div>
+            </div>
+        )}
+
+        {/* --- HEADER --- */}
+        <header className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
+            <div className="flex items-center gap-3"><Tv className="text-purple-500 w-8 h-8"/><div><h1 className="text-2xl font-black">STREAM VIEW</h1><p className="text-slate-400 font-mono">LOBBY: {lobbyCode}</p></div></div>
+            <button onClick={() => setView('login')} className="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded font-bold">EXIT</button>
+        </header>
+
+        {/* --- GRID --- */}
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 h-full">
+            {lobbyTeams.map(team => (
+                <div key={team.id} className="bg-slate-900 border-2 border-slate-800 rounded-2xl p-6 shadow-2xl h-fit">
+                    <div className="flex justify-between items-center mb-8 border-b border-slate-800 pb-6">
+                        <h2 className="text-5xl font-black text-white">{team.name}</h2>
+                        <div className="bg-black px-6 py-3 rounded-lg border border-slate-700 font-mono text-yellow-500 text-4xl font-black">{team.budget} <Coins className="inline w-8 h-8"/></div>
+                    </div>
+                    {/* STACKED PLAYERS */}
+                    <div className="flex flex-col gap-6">
+                        {[0, 1, 2].map(idx => {
+                            const p = team.players?.[idx];
+                            if (!p) return <div key={idx} className="bg-black/20 rounded-xl p-4 border border-dashed border-slate-800 text-slate-700 text-center font-bold">EMPTY SLOT</div>;
+                            
+                            return (
+                                <div key={idx} 
+                                     onClick={() => setFocusedPlayer(p)}
+                                     className="bg-black/40 rounded-xl p-6 border border-slate-700 hover:border-yellow-500 hover:bg-slate-800 transition-all cursor-zoom-in group">
+                                    <div className="flex justify-between items-center border-b border-slate-600 pb-2 mb-2">
+                                        <div className="font-black text-3xl text-slate-200 group-hover:text-yellow-400">{p.name}</div>
+                                        <div className="text-xs text-slate-500 uppercase font-bold bg-black px-2 py-1 rounded">Click to Zoom</div>
+                                    </div>
+                                    {renderPlayerArmy(p, true)}
+                                </div>
+                            )
+                        })}
+                    </div>
+                </div>
+            ))}
+        </div>
+
+        {/* --- TICKER --- */}
+        <div className="ticker-wrap">
+            <div className="ticker-content">
+                {tickerItems.map((item:any, i:number) => (
+                    <div key={i} className="ticker-item">
+                        {item.name.toUpperCase()}: <span className="text-green-400">{item.price}g</span> 
+                        <span className="text-slate-500 ml-2 text-sm">▲</span>
+                    </div>
+                ))}
+            </div>
+        </div>
+      </div>
+  )}
+
   if (view === 'moderator') return (
     <div className="min-h-screen bg-slate-950 text-white p-8">
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-7xl mx-auto">
         <header className="flex justify-between items-center mb-8 border-b border-slate-800 pb-4">
           <div className="flex items-center gap-3"><Trophy className="text-yellow-500 w-8 h-8"/><div><h1 className="text-2xl font-black">MODERATOR PANEL</h1><p className="text-slate-400 font-mono">LOBBY: {lobbyCode}</p></div></div>
           <button onClick={handleNuke} className="bg-red-600 hover:bg-red-500 px-6 py-2 rounded-lg font-bold flex items-center gap-2"><Trash2 size={18}/> DELETE LOBBY</button>
         </header>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {lobbyTeams.map(team => {
-            const teamItems = team.purchases || [];
-            const counts: any = {};
-            teamItems.forEach((p:any) => counts[p.item_id] = (counts[p.item_id] || 0) + 1);
-            const uniqueIds = Object.keys(counts);
-            return (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+          {lobbyTeams.map(team => (
               <div key={team.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-                <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-bold">{team.name}</h2><div className="bg-black px-4 py-2 rounded-lg border border-slate-700 font-mono text-yellow-500 text-xl font-bold">{team.budget} <Coins className="inline w-4 h-4"/></div></div>
-                <div className="space-y-3 mb-8">
-                  {team.players?.map((p:any, i:number) => <div key={i} className="flex items-center justify-between bg-slate-800 p-3 rounded-lg border border-slate-700"><div className="flex items-center gap-3"><div className="w-3 h-3 bg-green-500 rounded-full"/> <span className="font-bold">{p.name}</span></div><div className="flex gap-2"><button onClick={() => handleSwitch(p.id, team.name)} className="p-2 hover:bg-slate-600 rounded text-blue-400"><ArrowRightLeft size={18}/></button><button onClick={() => handleKick(p.id)} className="p-2 hover:bg-slate-600 rounded text-red-500"><Trash2 size={18}/></button></div></div>)}
+                <div className="flex justify-between items-center mb-6">
+                    {editingTeamId === team.id ? (
+                        <div className="flex items-center gap-2">
+                            <input autoFocus value={tempTeamName} onChange={e => setTempTeamName(e.target.value)} className="bg-black border border-slate-600 rounded px-2 py-1 text-xl font-bold w-48 text-white"/>
+                            <button onClick={() => handleRenameTeam(team.id)} className="bg-green-600 p-1.5 rounded hover:bg-green-500"><Save size={16}/></button>
+                            <button onClick={() => setEditingTeamId(null)} className="bg-red-600 p-1.5 rounded hover:bg-red-500"><X size={16}/></button>
+                        </div>
+                    ) : (
+                        <h2 className="text-2xl font-bold flex items-center gap-2 group cursor-pointer" onClick={() => { setTempTeamName(team.name); setEditingTeamId(team.id); }}>
+                            {team.name} <Edit2 size={14} className="text-slate-600 group-hover:text-white transition-colors"/>
+                        </h2>
+                    )}
+                    <div className="bg-black px-4 py-2 rounded-lg border border-slate-700 font-mono text-yellow-500 text-xl font-bold">{team.budget} <Coins className="inline w-4 h-4"/></div>
                 </div>
-                <div className="mt-4 border-t border-slate-800 pt-4">
-                    <h4 className="text-xs font-bold text-slate-500 mb-2">LIVE ARMY</h4>
-                    <div className="flex flex-wrap gap-1">
-                       {uniqueIds.map(id => {
-                          const item = dbItems.find(i => i.id === id);
-                          if(!item) return null;
-                          return (
-                              <div key={id} className="relative w-8 h-8 bg-slate-800 rounded border border-slate-700" title={item.name}>
-                                  <img src={getImageUrl(item.name, item.type, item.hero)} className="w-full h-full object-contain p-0.5"/>
-                                  <div className="absolute -top-1 -right-1 bg-yellow-500 text-black text-[8px] font-bold w-3 h-3 flex items-center justify-center rounded-full border border-black">{counts[id]}</div>
+                
+                {/* PLAYER ROWS WITH INDIVIDUAL ARMY */}
+                <div className="space-y-4 mb-8">
+                  {team.players?.map((p:any, i:number) => (
+                      <div key={i} className="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                          <div className="flex items-center justify-between mb-3 border-b border-slate-700 pb-2">
+                              <div className="flex items-center gap-3"><div className="w-3 h-3 bg-green-500 rounded-full"/> <span className="font-bold text-lg">{p.name}</span></div>
+                              <div className="flex gap-2">
+                                  <button onClick={() => handleSwitch(p.id, team.name)} className="p-1.5 hover:bg-slate-600 rounded text-blue-400" title="Switch Team"><ArrowRightLeft size={16}/></button>
+                                  <button onClick={() => handleKick(p.id)} className="p-1.5 hover:bg-slate-600 rounded text-red-500" title="Kick Player"><Trash2 size={16}/></button>
                               </div>
-                          )
-                       })}
-                       {uniqueIds.length === 0 && <span className="text-xs text-slate-700 italic">No troops bought yet.</span>}
-                    </div>
+                          </div>
+                          {/* INDIVIDUAL ARMY HERE */}
+                          {renderPlayerArmy(p)}
+                      </div>
+                  ))}
                 </div>
+                
                 <button onClick={() => handleReset(team.id)} className="w-full mt-6 bg-slate-800 hover:bg-red-900/30 text-red-400 border border-slate-700 py-4 rounded-xl font-bold flex justify-center gap-2 transition-all"><RefreshCw/> RESET {team.name.toUpperCase()}</button>
               </div>
-            );
-          })}
+          ))}
         </div>
       </div>
     </div>
