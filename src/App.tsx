@@ -246,7 +246,7 @@ export function App() {
   const [tempTeamName, setTempTeamName] = useState('');
   
   // Streamer Features
-  const [focusedPlayer, setFocusedPlayer] = useState<any>(null); // <--- NEW: Zoom state
+  const [focusedPlayer, setFocusedPlayer] = useState<any>(null);
 
   // Game
   const [teamBudget, setTeamBudget] = useState(100);
@@ -255,13 +255,17 @@ export function App() {
   const [myPurchases, setMyPurchases] = useState<any[]>([]);
   const [isSeeding, setIsSeeding] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(true); // <--- NEW: Loading state for restore
   
   // Referee State
   const [refLinks, setRefLinks] = useState(['', '', '']);
   const [refResult, setRefResult] = useState<number | null>(null);
 
   // --- INIT ---
-  useEffect(() => { checkDatabase(); }, []);
+  useEffect(() => { 
+      checkDatabase(); 
+      attemptRestoreSession(); // <--- NEW: Try to restore on load
+  }, []);
 
   const checkDatabase = async () => {
     const { count, error } = await supabase.from('items').select('*', { count: 'exact', head: true });
@@ -282,6 +286,39 @@ export function App() {
   const loadItems = async () => {
     const { data } = await supabase.from('items').select('*');
     if (data) setDbItems(data as Item[]);
+  };
+
+  // --- SESSION RESTORE (NEW) ---
+  const attemptRestoreSession = async () => {
+      const storedPid = localStorage.getItem('iw_pid');
+      const storedTid = localStorage.getItem('iw_tid');
+      const storedLobby = localStorage.getItem('iw_lobby');
+
+      if (storedPid && storedTid && storedLobby) {
+          // Verify existence in DB (in case kicked while gone)
+          const { data: player } = await supabase.from('players').select('id, name, team_id').eq('id', storedPid).single();
+          if (player && player.team_id === storedTid) {
+              // Valid session found
+              setPlayerId(player.id);
+              setTeamId(player.team_id);
+              setPlayerName(player.name);
+              setLobbyCode(storedLobby);
+              
+              // We need to fetch lobby info to set foundLobby
+              const { data: lobby } = await supabase.from('lobbies').select('*').eq('code', storedLobby).single();
+              if (lobby) {
+                  setFoundLobby(lobby);
+                  // Restore Team Name
+                  const { data: team } = await supabase.from('teams').select('name').eq('id', storedTid).single();
+                  setTeamName(team?.name || '');
+                  setView('game');
+              }
+          } else {
+              // Invalid session (kicked or deleted)
+              localStorage.clear();
+          }
+      }
+      setIsRestoring(false);
   };
 
   // --- NAVIGATION ---
@@ -339,6 +376,12 @@ export function App() {
     const { data: tIdData } = await supabase.from('teams').select('id').eq('lobby_id', foundLobby.id).eq('name', tName).single();
     const { data: p, error } = await supabase.from('players').insert({ team_id: tIdData!.id, name: playerName }).select().single();
     if (error) return alert("Error joining.");
+    
+    // SAVE SESSION (NEW)
+    localStorage.setItem('iw_pid', p.id);
+    localStorage.setItem('iw_tid', tIdData!.id);
+    localStorage.setItem('iw_lobby', lobbyCode);
+
     setPlayerId(p.id); setTeamId(tIdData!.id); setTeamName(tName); setView('game');
   };
 
@@ -354,10 +397,15 @@ export function App() {
             }
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'purchases', filter: `team_id=eq.${teamId}` }, () => fetchGameState())
-        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'players', filter: `id=eq.${playerId}` }, () => { alert("Kicked."); setView('login'); setPlayerId(null); setTeamId(null); })
+        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'players', filter: `id=eq.${playerId}` }, () => { 
+            alert("Kicked."); 
+            localStorage.clear(); // CLEAR ON KICK
+            setView('login'); setPlayerId(null); setTeamId(null); 
+        })
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'players', filter: `id=eq.${playerId}` }, async (payload) => {
             alert("Moved to new team. Army reset.");
             const newTid = payload.new.team_id;
+            localStorage.setItem('iw_tid', newTid); // UPDATE STORAGE IF MOVED
             const { data: t } = await supabase.from('teams').select('name').eq('id', newTid).single();
             setTeamId(newTid); setTeamName(t?.name || ''); setMyPurchases([]); setTeamPurchases([]);
         })
@@ -381,6 +429,7 @@ export function App() {
       const lobbyCh = supabase.channel('lobby-watch')
         .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'lobbies', filter: `id=eq.${foundLobby.id}` }, () => {
           alert("Lobby closed by Moderator.");
+          localStorage.clear(); // CLEAR ON NUKE
           setView('login');
           setFoundLobby(null);
           setLobbyTeams([]);
@@ -419,7 +468,12 @@ export function App() {
           await supabase.rpc('delete_lobby', { p_lobby_id: foundLobby.id }); 
       } 
   };
-  const handleLeave = async () => { if(confirm("Leave match?")) await supabase.rpc('leave_team', { p_player_id: playerId }); };
+  const handleLeave = async () => { 
+      if(confirm("Leave match?")) {
+          localStorage.clear(); // CLEAR ON LEAVE
+          await supabase.rpc('leave_team', { p_player_id: playerId }); 
+      }
+  };
   
   const handleRenameTeam = async (tId: string) => {
       if(!tempTeamName.trim()) return;
@@ -502,59 +556,38 @@ export function App() {
     window.open(`https://link.clashofclans.com/en?action=CopyArmy&army=u${uStr}-s${sStr}-${hStr}`, '_blank');
   };
 
-  // --- TICKER LOGIC (TEAM COLORED) ---
+  // --- TICKER LOGIC ---
   const getTickerItems = () => {
     const allItems: any[] = [];
-    
     lobbyTeams.forEach((team, index) => {
-        // 1. Get all purchases for this specific team
         const teamPurchases: any[] = [];
         if (team.players) {
-            team.players.forEach((p: any) => {
-                if (p.purchases) teamPurchases.push(...p.purchases);
-            });
+            team.players.forEach((p: any) => { if (p.purchases) teamPurchases.push(...p.purchases); });
         }
-
-        // 2. Count them
         const counts: any = {};
         teamPurchases.forEach((p:any) => counts[p.item_id] = (counts[p.item_id] || 0) + 1);
-        
-        // 3. Create ticker objects
         Object.keys(counts).forEach(itemId => {
             const item = dbItems.find(i => i.id === itemId);
             if(item) {
                 const count = counts[itemId];
                 const price = item.base_price + (count * 2);
-                
-                // Determine Color (Team 1 = Cyan, Team 2 = Red)
                 const colorClass = index === 0 ? "text-cyan-400" : "text-red-500";
-                
-                allItems.push({
-                    name: item.name,
-                    price: price,
-                    teamName: team.name,
-                    color: colorClass,
-                    id: itemId + team.id // Unique key for React
-                });
+                allItems.push({ name: item.name, price: price, teamName: team.name, color: colorClass, id: itemId + team.id });
             }
         });
     });
-
-    // 4. Sort everything by price (High to Low) and take top 25
     return allItems.sort((a, b) => b.price - a.price).slice(0, 25);
   };
+
   // --- RENDER HELPERS ---
   const renderPlayerArmy = (p: any, isLarge = false) => {
       const myItems = p.purchases || []; 
-      
       if (myItems.length === 0) return <div className={`${isLarge ? 'text-xl' : 'text-xs'} text-slate-600 italic mt-2`}>No items yet</div>;
-
       const counts: any = {};
       myItems.forEach((x:any) => counts[x.item_id] = (counts[x.item_id] || 0) + 1);
       const active = myItems.map((x:any) => dbItems.find(i => i.id === x.item_id)).filter(Boolean);
       const heroKeys = ['BK', 'AQ', 'GW', 'RC', 'MP'].filter(h => active.some((i:any) => i.hero === h));
       const unique = Array.from(new Map(active.map((i:any) => [i.id, i])).values());
-
       const heroImgClass = isLarge ? "w-20 h-20 border-4" : "w-5 h-5 border";
       const equipImgClass = isLarge ? "w-14 h-14 bg-slate-900 border-2 p-1" : "w-4 h-4";
       const itemBoxClass = isLarge ? "w-24 h-24 border-2 rounded-xl" : "w-6 h-6 border rounded";
@@ -646,18 +679,22 @@ export function App() {
   );
 
   // --- VIEWS ---
-  if (view === 'login') return (
-    <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4">
-      <div className="max-w-md w-full bg-slate-900 p-8 rounded-2xl border border-slate-800 text-center">
-        <Shield className="w-16 h-16 text-yellow-500 mx-auto mb-4" />
-        <h1 className="text-3xl font-black mb-6">INFLATION WAR</h1>
-        <form onSubmit={handleFindLobby} className="space-y-4">
-          <input value={lobbyCode} onChange={e => setLobbyCode(e.target.value)} className="w-full bg-black border border-slate-700 rounded-lg p-4 text-center text-2xl font-mono uppercase tracking-widest outline-none focus:border-yellow-500" placeholder="CODE" />
-          <button className="w-full bg-blue-600 text-white font-bold py-4 rounded-lg hover:bg-blue-500">ENTER</button>
-        </form>
-      </div>
-    </div>
-  );
+  if (view === 'login') {
+      if (isRestoring) return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="w-10 h-10 animate-spin text-blue-500"/></div>;
+      
+      return (
+        <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4">
+          <div className="max-w-md w-full bg-slate-900 p-8 rounded-2xl border border-slate-800 text-center">
+            <Shield className="w-16 h-16 text-yellow-500 mx-auto mb-4" />
+            <h1 className="text-3xl font-black mb-6">INFLATION WAR</h1>
+            <form onSubmit={handleFindLobby} className="space-y-4">
+              <input value={lobbyCode} onChange={e => setLobbyCode(e.target.value)} className="w-full bg-black border border-slate-700 rounded-lg p-4 text-center text-2xl font-mono uppercase tracking-widest outline-none focus:border-yellow-500" placeholder="CODE" />
+              <button className="w-full bg-blue-600 text-white font-bold py-4 rounded-lg hover:bg-blue-500">ENTER</button>
+            </form>
+          </div>
+        </div>
+      );
+  }
 
   if (view === 'referee') return (
     <div className="min-h-screen bg-slate-950 text-white p-8 flex items-center justify-center">
@@ -683,7 +720,6 @@ export function App() {
       const tickerItems = getTickerItems();
       return (
       <div className="min-h-screen bg-slate-950 text-white p-6 pb-20 overflow-hidden relative">
-        {/* CHANGED: animation duration from 30s to 60s */}
         <style>{`
           @keyframes marquee { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }
           .ticker-wrap { position: fixed; bottom: 0; left: 0; width: 100%; height: 50px; background: #000; overflow: hidden; white-space: nowrap; z-index: 100; border-top: 2px solid #334155; display: flex; align-items: center; }
@@ -691,7 +727,6 @@ export function App() {
           .ticker-item { display: inline-block; padding: 0 2rem; font-family: monospace; font-size: 1.2rem; font-weight: bold; color: #fbbf24; }
         `}</style>
 
-        {/* --- ZOOM MODAL --- */}
         {focusedPlayer && (
             <div className="fixed inset-0 bg-black/90 z-[200] flex items-center justify-center p-10 backdrop-blur-sm" onClick={() => setFocusedPlayer(null)}>
                 <div className="bg-slate-900 border-4 border-yellow-500 p-8 rounded-3xl shadow-2xl max-w-5xl w-full transform scale-110" onClick={e => e.stopPropagation()}>
@@ -699,19 +734,16 @@ export function App() {
                         <h2 className="text-6xl font-black text-white">{focusedPlayer.name}</h2>
                         <button onClick={() => setFocusedPlayer(null)} className="bg-red-600 hover:bg-red-500 text-white p-4 rounded-xl"><X size={32}/></button>
                     </div>
-                    {/* Render with EXTRA LARGE flag */}
                     {renderPlayerArmy(focusedPlayer, true)}
                 </div>
             </div>
         )}
 
-        {/* --- HEADER --- */}
         <header className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
             <div className="flex items-center gap-3"><Tv className="text-purple-500 w-8 h-8"/><div><h1 className="text-2xl font-black">STREAM VIEW</h1><p className="text-slate-400 font-mono">LOBBY: {lobbyCode}</p></div></div>
             <button onClick={() => setView('login')} className="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded font-bold">EXIT</button>
         </header>
 
-        {/* --- GRID --- */}
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 h-full">
             {lobbyTeams.map(team => (
                 <div key={team.id} className="bg-slate-900 border-2 border-slate-800 rounded-2xl p-6 shadow-2xl h-fit">
@@ -719,7 +751,6 @@ export function App() {
                         <h2 className="text-5xl font-black text-white">{team.name}</h2>
                         <div className="bg-black px-6 py-3 rounded-lg border border-slate-700 font-mono text-yellow-500 text-4xl font-black">{team.budget} <Coins className="inline w-8 h-8"/></div>
                     </div>
-                    {/* STACKED PLAYERS */}
                     <div className="flex flex-col gap-6">
                         {[0, 1, 2].map(idx => {
                             const p = team.players?.[idx];
@@ -742,7 +773,6 @@ export function App() {
             ))}
         </div>
 
-        {/* --- TICKER --- */}
         <div className="ticker-wrap">
             <div className="ticker-content">
                 {tickerItems.map((item:any, i:number) => (
@@ -782,7 +812,6 @@ export function App() {
                     <div className="bg-black px-4 py-2 rounded-lg border border-slate-700 font-mono text-yellow-500 text-xl font-bold">{team.budget} <Coins className="inline w-4 h-4"/></div>
                 </div>
                 
-                {/* PLAYER ROWS WITH INDIVIDUAL ARMY */}
                 <div className="space-y-4 mb-8">
                   {team.players?.map((p:any, i:number) => (
                       <div key={i} className="bg-slate-800 p-4 rounded-lg border border-slate-700">
@@ -793,7 +822,6 @@ export function App() {
                                   <button onClick={() => handleKick(p.id)} className="p-1.5 hover:bg-slate-600 rounded text-red-500" title="Kick Player"><Trash2 size={16}/></button>
                               </div>
                           </div>
-                          {/* INDIVIDUAL ARMY HERE */}
                           {renderPlayerArmy(p)}
                       </div>
                   ))}
