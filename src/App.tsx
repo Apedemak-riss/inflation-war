@@ -525,12 +525,16 @@ export function App() {
     active.forEach(i => counts[i.id] = (counts[i.id] || 0) + 1);
     const unique = Array.from(new Map(active.map(i => [i.id, i])).values());
 
-    // 3. Generate Link Parts
-    const uStr = unique.filter(i => ['troop','siege','super_troop'].includes(i.type)).map(i => `${counts[i.id]}x${i.coc_id % 1000000}`).join('-');
-    const sStr = unique.filter(i => i.type === 'spell').map(i => `${counts[i.id]}x${i.coc_id % 1000000}`).join('-');
+    // 3. Generate Troop & Spell Parts (Pre-calculated strings)
+    // Note: We intentionally leave off the 'u' and 's' prefix here to handle empty strings better later
+    const uPart = unique.filter(i => ['troop','siege','super_troop'].includes(i.type))
+                        .map(i => `${counts[i.id]}x${i.coc_id % 1000000}`).join('-');
     
-    // 4. Hero & Pet Logic (h{ID}p{ID}e{ID}_{ID})
-    const heroOrder = ['BK', 'AQ', 'GW', 'RC', 'MP']; // Order matters for link generation usually
+    const sPart = unique.filter(i => i.type === 'spell')
+                        .map(i => `${counts[i.id]}x${i.coc_id % 1000000}`).join('-');
+    
+    // 4. Hero & Pet Logic
+    const heroOrder = ['BK', 'AQ', 'GW', 'RC', 'MP'];
     const hStrParts: string[] = [];
 
     heroOrder.forEach(h => {
@@ -541,16 +545,24 @@ export function App() {
         const equips = active.filter(i => i.type === 'equipment' && i.hero === h).map(i => i.coc_id);
 
         if (pet || equips.length > 0) {
-            let part = `h${hId}`; // e.g. h0
-            if (pet) part += `p${pet.coc_id}`; // e.g. h0p10
-            if (equips.length > 0) part += `e${equips.join('_')}`; // e.g. h0p10e0_1
+            // NEW: We do NOT add 'h' here. We just start with the ID. e.g. "0p10e1_2"
+            let part = `${hId}`; 
+            if (pet) part += `p${pet.coc_id}`;
+            if (equips.length > 0) part += `e${equips.join('_')}`;
             hStrParts.push(part);
         }
     });
     
-    const hStr = hStrParts.join('-');
+    // Join heroes with '-', then prepend 'h' only once at the start
+    const hFinal = hStrParts.length > 0 ? `h${hStrParts.join('-')}` : '';
+    const uFinal = uPart ? `u${uPart}` : '';
+    const sFinal = sPart ? `s${sPart}` : '';
 
-    window.open(`https://link.clashofclans.com/en?action=CopyArmy&army=u${uStr}-s${sStr}-${hStr}`, '_blank');
+    // 5. Build Final Link (Heroes FIRST)
+    // Filter Boolean removes empty strings so we don't get double dashes like "--"
+    const finalString = [hFinal, uFinal, sFinal].filter(Boolean).join('-');
+
+    window.open(`https://link.clashofclans.com/en?action=CopyArmy&army=${finalString}`, '_blank');
   };
 
   const getTickerItems = () => {
