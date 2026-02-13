@@ -213,8 +213,8 @@ export function App() {
     let grandTotal = 0;
     const teamCounts: Record<string, number> = {}; 
 
-    // Helper to parse "5x123-2x456" segments
-    const parseSegment = (segment: string) => {
+    // Helper: Parse "5x123" but ONLY match specific item types
+    const parseSegment = (segment: string, allowedTypes: string[]) => {
         if (!segment) return;
         const parts = segment.split('-');
         parts.forEach(p => {
@@ -223,8 +223,12 @@ export function App() {
             const count = parseInt(countStr);
             const cocId = parseInt(cocIdStr);
             
-            // Match CoC ID to our DB item using modulo 1000000
-            const item = dbItems.find(i => (i.coc_id % 1000000) === (cocId % 1000000));
+            // Find item by ID AND Type
+            const item = dbItems.find(i => 
+                (i.coc_id % 1000000) === (cocId % 1000000) && 
+                allowedTypes.includes(i.type)
+            );
+            
             if (item) {
                 teamCounts[item.id] = (teamCounts[item.id] || 0) + count;
             }
@@ -233,25 +237,24 @@ export function App() {
 
     refLinks.forEach(link => {
         if (!link) return;
-
-        // 1. CLEAN THE LINK
-        // If it's a full URL, grab only the part after 'army='
-        // This prevents the 's' in 'https' from breaking the Spell detection
-        let armyString = link;
-        if (link.includes('army=')) {
-            armyString = link.split('army=')[1];
-        }
-
-        // 2. Extract Sections from the Clean String
-        // u = Army, s = Spells, h = Heroes. We ignore i/d (Clan Castle)
-        const uMatch = armyString.match(/u([^sihd]+)/);
-        const sMatch = armyString.match(/s([^uhid]+)/);
-        const hMatch = armyString.match(/h([^usid]+)/);
-
-        if (uMatch) parseSegment(uMatch[1]);
-        if (sMatch) parseSegment(sMatch[1]);
         
-        // 3. Special Logic for Hero Equipment
+        // 1. Clean Link
+        let armyString = link;
+        if (link.includes('army=')) armyString = link.split('army=')[1];
+
+        // 2. Extract Sections
+        const uMatch = armyString.match(/u([^sihd]+)/); // Troops/Sieges
+        const sMatch = armyString.match(/s([^uhid]+)/); // Spells
+        const hMatch = armyString.match(/h([^usid]+)/); // Heroes
+
+        // 3. Parse with STRICT Type Filters
+        // 'u' contains Troops, Super Troops, and Sieges
+        if (uMatch) parseSegment(uMatch[1], ['troop', 'super_troop', 'siege']);
+        
+        // 's' contains ONLY Spells
+        if (sMatch) parseSegment(sMatch[1], ['spell']);
+        
+        // 4. Hero Equipment Logic
         if (hMatch) {
             const heroes = hMatch[1].split('-');
             heroes.forEach(hStr => {
@@ -267,8 +270,7 @@ export function App() {
         }
     });
 
-    // 4. Calculate Total Cost
-    // Formula: (N * Base) + (N * (N-1))
+    // 5. Calculate Total
     Object.keys(teamCounts).forEach(itemId => {
         const item = dbItems.find(i => i.id === itemId);
         if (item) {
