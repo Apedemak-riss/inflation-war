@@ -467,8 +467,26 @@ export function App() {
   const handleBuy = async (item: Item, targetHero: string | null = null) => {
     if (isProcessing) return;
 
+    // 1. Determine the Hero involved (Directly or via Pet)
+    const involvedHero = targetHero || item.hero;
+
+    // 2. CHECK: Max 4 Heroes Logic
+    if (involvedHero) {
+        // Get list of all heroes currently in use by this player
+        const activeHeroes = new Set<string>();
+        myPurchases.forEach(p => {
+            if (p.equipped_hero) activeHeroes.add(p.equipped_hero); // Pet owner
+            const dbItem = dbItems.find(i => i.id === p.item_id);
+            if (dbItem?.hero) activeHeroes.add(dbItem.hero); // Equipment owner
+        });
+
+        // If this is a NEW hero and we already have 4, block it
+        if (!activeHeroes.has(involvedHero) && activeHeroes.size >= 4) {
+            return alert("You can only use 4 Heroes! Remove items from another hero first.");
+        }
+    }
+
     if (item.type === 'pet' && !targetHero) {
-        // Open Modal
         setPetModalItem(item);
         return;
     }
@@ -476,7 +494,6 @@ export function App() {
     let cat: any = 'troop';
     if (item.type === 'spell') cat = 'spell'; else if (item.type === 'siege') cat = 'siege'; else if (item.type === 'equipment') cat = 'equipment';
     
-    // Client-side checks (Basic)
     if (cat !== 'equipment' && item.type !== 'pet') {
       const current = getCurrentWeight(cat);
       if (current + item.housing_space > LIMITS[cat as keyof typeof LIMITS]) return alert("Full Capacity!");
@@ -486,16 +503,15 @@ export function App() {
     if (teamBudget < price) return alert("No Budget!");
 
     setIsProcessing(true);
-    if(petModalItem) setPetModalItem(null); // Close modal if open
+    if(petModalItem) setPetModalItem(null); 
 
     const mockId = Math.random().toString();
-    // Add optimistic update
     setMyPurchases(prev => [...prev, { item_id: item.id, player_id: playerId, id: mockId, equipped_hero: targetHero }]);
 
     const { data, error } = await supabase.rpc('buy_item', { 
         p_player_id: playerId, 
         p_item_id: item.id,
-        p_target_hero: targetHero // Pass the selected hero
+        p_target_hero: targetHero 
     });
 
     if (error || (data && !data.success)) {
