@@ -789,7 +789,22 @@ export function App() {
   );
 
   // --- VIEWS ---
-  if (view === 'login') { if (isRestoring) return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="w-10 h-10 animate-spin text-blue-500"/></div>; return (<div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4"><div className="max-w-md w-full bg-slate-900 p-8 rounded-2xl border border-slate-800 text-center"><Shield className="w-16 h-16 text-yellow-500 mx-auto mb-4" /><h1 className="text-3xl font-black mb-6">INFLATION WAR</h1><form onSubmit={handleFindLobby} className="space-y-4"><input value={lobbyCode} onChange={e => setLobbyCode(e.target.value)} className="w-full bg-black border border-slate-700 rounded-lg p-4 text-center text-2xl font-mono uppercase tracking-widest outline-none focus:border-yellow-500" placeholder="CODE" /><button className="w-full bg-blue-600 text-white font-bold py-4 rounded-lg hover:bg-blue-500">ENTER</button></form><div className="mt-8 pt-4 border-t border-slate-800"><button onClick={seedDatabase} className="text-xs text-slate-500 hover:text-white flex items-center justify-center gap-2 mx-auto"><RefreshCw size={12}/> Refresh Database (Add Pets)</button></div></div></div>); }
+  if (view === 'login') {
+      if (isRestoring) return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="w-10 h-10 animate-spin text-blue-500"/></div>;
+      
+      return (
+        <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4">
+          <div className="max-w-md w-full bg-slate-900 p-8 rounded-2xl border border-slate-800 text-center">
+            <Shield className="w-16 h-16 text-yellow-500 mx-auto mb-4" />
+            <h1 className="text-3xl font-black mb-6">INFLATION WAR</h1>
+            <form onSubmit={handleFindLobby} className="space-y-4">
+              <input value={lobbyCode} onChange={e => setLobbyCode(e.target.value)} className="w-full bg-black border border-slate-700 rounded-lg p-4 text-center text-2xl font-mono uppercase tracking-widest outline-none focus:border-yellow-500" placeholder="CODE" />
+              <button className="w-full bg-blue-600 text-white font-bold py-4 rounded-lg hover:bg-blue-500">ENTER</button>
+            </form>
+          </div>
+        </div>
+      );
+  }
   if (view === 'referee') return (<div className="min-h-screen bg-slate-950 text-white p-8 flex items-center justify-center"><div className="max-w-2xl w-full bg-slate-900 p-8 rounded-2xl border border-slate-800"><div className="flex items-center gap-3 mb-6"><Gavel className="text-yellow-500 w-8 h-8"/><h1 className="text-2xl font-black">LEGALITY CHECK</h1></div><div className="space-y-4 mb-6">{refLinks.map((L, i) => <input key={i} value={L} onChange={e => { const n=[...refLinks]; n[i]=e.target.value; setRefLinks(n); }} className="w-full bg-black border border-slate-700 rounded p-3 text-sm font-mono" placeholder={`Paste Player ${i+1} Army Link`} />)}</div><button onClick={handleRefereeCheck} className="w-full bg-green-600 py-4 rounded font-bold hover:bg-green-500 mb-6 flex items-center justify-center gap-2"><ClipboardCheck/> CALCULATE TEAM SPEND</button>{refResult !== null && (<div className={`text-center p-6 rounded-xl border-2 ${refResult > 100 ? 'bg-red-900/20 border-red-500' : 'bg-green-900/20 border-green-500'}`}><div className="text-sm text-slate-400 uppercase font-bold mb-2">Total Team Value</div><div className={`text-5xl font-black mb-2 ${refResult > 100 ? 'text-red-500' : 'text-green-500'}`}>{refResult} GOLD</div><div className="text-xl font-bold">{refResult > 100 ? <span className="flex items-center justify-center gap-2"><AlertTriangle/> ILLEGAL (OVER 100)</span> : <span className="flex items-center justify-center gap-2"><Check/> LEGAL</span>}</div></div>)}<button onClick={()=>setView('login')} className="block w-full text-center text-slate-500 mt-6 hover:text-white">Exit Referee</button></div></div>);
   if (view === 'streamer') { 
       const tickerItems = getTickerItems(); 
