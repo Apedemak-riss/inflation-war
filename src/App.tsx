@@ -209,11 +209,14 @@ export function App() {
   const [refResult, setRefResult] = useState<number | null>(null);
 
   // --- REFEREE LOGIC ---
+  // Add this state variable at the top with the others
+  const [refBreakdown, setRefBreakdown] = useState<any[]>([]);
+
   const handleRefereeCheck = () => {
     let grandTotal = 0;
     const teamCounts: Record<string, number> = {}; 
 
-    // Helper: Parse "5x123" but ONLY match specific item types
+    // Helper: Parse "5x123" with strict type checking
     const parseSegment = (segment: string, allowedTypes: string[]) => {
         if (!segment) return;
         const parts = segment.split('-');
@@ -223,7 +226,7 @@ export function App() {
             const count = parseInt(countStr);
             const cocId = parseInt(cocIdStr);
             
-            // Find item by ID AND Type
+            // Strict Match: ID + Type
             const item = dbItems.find(i => 
                 (i.coc_id % 1000000) === (cocId % 1000000) && 
                 allowedTypes.includes(i.type)
@@ -238,23 +241,20 @@ export function App() {
     refLinks.forEach(link => {
         if (!link) return;
         
-        // 1. Clean Link
+        // 1. Clean Link (remove https://...)
         let armyString = link;
         if (link.includes('army=')) armyString = link.split('army=')[1];
 
         // 2. Extract Sections
-        const uMatch = armyString.match(/u([^sihd]+)/); // Troops/Sieges
+        const uMatch = armyString.match(/u([^sihd]+)/); // Troops
         const sMatch = armyString.match(/s([^uhid]+)/); // Spells
         const hMatch = armyString.match(/h([^usid]+)/); // Heroes
 
-        // 3. Parse with STRICT Type Filters
-        // 'u' contains Troops, Super Troops, and Sieges
+        // 3. Parse Sections
         if (uMatch) parseSegment(uMatch[1], ['troop', 'super_troop', 'siege']);
-        
-        // 's' contains ONLY Spells
         if (sMatch) parseSegment(sMatch[1], ['spell']);
         
-        // 4. Hero Equipment Logic
+        // 4. Hero Equipment
         if (hMatch) {
             const heroes = hMatch[1].split('-');
             heroes.forEach(hStr => {
@@ -270,18 +270,22 @@ export function App() {
         }
     });
 
-    // 5. Calculate Total
+    // 5. Calculate & Generate Breakdown
+    const breakdown: any[] = [];
     Object.keys(teamCounts).forEach(itemId => {
         const item = dbItems.find(i => i.id === itemId);
         if (item) {
             const n = teamCounts[itemId];
             const baseCost = item.base_price * n;
             const inflationCost = n * (n - 1); 
-            grandTotal += baseCost + inflationCost;
+            const total = baseCost + inflationCost;
+            grandTotal += total;
+            breakdown.push({ name: item.name, count: n, cost: total });
         }
     });
 
     setRefResult(grandTotal);
+    setRefBreakdown(breakdown.sort((a,b) => b.cost - a.cost)); // Sort by most expensive
   };
 
   useEffect(() => { checkDatabase(); attemptRestoreSession(); }, []);
@@ -881,7 +885,47 @@ export function App() {
         </div>
       );
   }
-  if (view === 'referee') return (<div className="min-h-screen bg-slate-950 text-white p-8 flex items-center justify-center"><div className="max-w-2xl w-full bg-slate-900 p-8 rounded-2xl border border-slate-800"><div className="flex items-center gap-3 mb-6"><Gavel className="text-yellow-500 w-8 h-8"/><h1 className="text-2xl font-black">LEGALITY CHECK</h1></div><div className="space-y-4 mb-6">{refLinks.map((L, i) => <input key={i} value={L} onChange={e => { const n=[...refLinks]; n[i]=e.target.value; setRefLinks(n); }} className="w-full bg-black border border-slate-700 rounded p-3 text-sm font-mono" placeholder={`Paste Player ${i+1} Army Link`} />)}</div><button onClick={handleRefereeCheck} className="w-full bg-green-600 py-4 rounded font-bold hover:bg-green-500 mb-6 flex items-center justify-center gap-2"><ClipboardCheck/> CALCULATE TEAM SPEND</button>{refResult !== null && (<div className={`text-center p-6 rounded-xl border-2 ${refResult > 100 ? 'bg-red-900/20 border-red-500' : 'bg-green-900/20 border-green-500'}`}><div className="text-sm text-slate-400 uppercase font-bold mb-2">Total Team Value</div><div className={`text-5xl font-black mb-2 ${refResult > 100 ? 'text-red-500' : 'text-green-500'}`}>{refResult} GOLD</div><div className="text-xl font-bold">{refResult > 100 ? <span className="flex items-center justify-center gap-2"><AlertTriangle/> ILLEGAL (OVER 100)</span> : <span className="flex items-center justify-center gap-2"><Check/> LEGAL</span>}</div></div>)}<button onClick={()=>setView('login')} className="block w-full text-center text-slate-500 mt-6 hover:text-white">Exit Referee</button></div></div>);
+  if (view === 'referee') return (
+    <div className="min-h-screen bg-slate-950 text-white p-8 flex items-center justify-center">
+      <div className="max-w-2xl w-full bg-slate-900 p-8 rounded-2xl border border-slate-800">
+        <div className="flex items-center gap-3 mb-6"><Gavel className="text-yellow-500 w-8 h-8"/><h1 className="text-2xl font-black">LEGALITY CHECK</h1></div>
+        
+        {/* Inputs */}
+        <div className="space-y-4 mb-6">
+            {refLinks.map((L, i) => <input key={i} value={L} onChange={e => { const n=[...refLinks]; n[i]=e.target.value; setRefLinks(n); }} className="w-full bg-black border border-slate-700 rounded p-3 text-sm font-mono" placeholder={`Paste Player ${i+1} Army Link`} />)}
+        </div>
+        
+        <button onClick={handleRefereeCheck} className="w-full bg-green-600 py-4 rounded font-bold hover:bg-green-500 mb-6 flex items-center justify-center gap-2 uppercase tracking-widest"><ClipboardCheck/> Verify Budget</button>
+        
+        {/* Results with Breakdown */}
+        {refResult !== null && (
+            <div className="bg-black/50 rounded-xl border border-slate-700 overflow-hidden">
+                <div className={`text-center p-6 border-b border-slate-700 ${refResult > 100 ? 'bg-red-900/20' : 'bg-green-900/20'}`}>
+                    <div className="text-sm text-slate-400 uppercase font-bold mb-1">Total Team Value</div>
+                    <div className={`text-6xl font-black ${refResult > 100 ? 'text-red-500' : 'text-green-500'}`}>{refResult}g</div>
+                </div>
+                <div className="p-4 max-h-60 overflow-y-auto">
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr className="text-slate-500 border-b border-slate-800"><th className="text-left pb-2">Item</th><th className="pb-2">Qty</th><th className="text-right pb-2">Cost</th></tr>
+                        </thead>
+                        <tbody>
+                            {refBreakdown.map((b, i) => (
+                                <tr key={i} className="border-b border-slate-800/50">
+                                    <td className="py-2 font-bold">{b.name}</td>
+                                    <td className="py-2 text-center text-slate-400">x{b.count}</td>
+                                    <td className="py-2 text-right text-yellow-500 font-mono">{b.cost}g</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        )}
+        <button onClick={()=>setView('login')} className="block w-full text-center text-slate-500 mt-6 hover:text-white underline">Exit Referee</button>
+      </div>
+    </div>
+  );
   if (view === 'streamer') { 
       const tickerItems = getTickerItems(); 
       return (<div className="min-h-screen bg-slate-950 text-white p-6 pb-20 overflow-hidden relative"><style>{`@keyframes marquee { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } } .ticker-wrap { position: fixed; bottom: 0; left: 0; width: 100%; height: 50px; background: #000; overflow: hidden; white-space: nowrap; z-index: 100; border-top: 2px solid #334155; display: flex; align-items: center; } .ticker-content { display: inline-block; padding-left: 100%; animation: marquee 60s linear infinite; } .ticker-item { display: inline-block; padding: 0 2rem; font-family: monospace; font-size: 1.2rem; font-weight: bold; color: #fbbf24; } .custom-scrollbar::-webkit-scrollbar { display: none; } .custom-scrollbar { -ms-overflow-style: none;  scrollbar-width: none; }`}</style>
