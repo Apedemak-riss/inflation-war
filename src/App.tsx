@@ -213,7 +213,7 @@ export function App() {
     let grandTotal = 0;
     const teamCounts: Record<string, number> = {}; 
 
-    // Helper to parse "5x123-2x456" segments from a link
+    // Helper to parse "5x123-2x456" segments
     const parseSegment = (segment: string) => {
         if (!segment) return;
         const parts = segment.split('-');
@@ -223,7 +223,7 @@ export function App() {
             const count = parseInt(countStr);
             const cocId = parseInt(cocIdStr);
             
-            // Match CoC ID (e.g., 4000013) to our DB item using modulo
+            // Match CoC ID to our DB item using modulo 1000000
             const item = dbItems.find(i => (i.coc_id % 1000000) === (cocId % 1000000));
             if (item) {
                 teamCounts[item.id] = (teamCounts[item.id] || 0) + count;
@@ -231,20 +231,27 @@ export function App() {
         });
     };
 
-    // Process each of the 3 link inputs
     refLinks.forEach(link => {
-        if (!link || !link.includes('army=')) return;
-        
-        // Extract sections: u (Army), s (Spells), h (Heroes/Equipment)
-        // We ignore i/d because Clan Castle is 0 gold
-        const uMatch = link.match(/u([^sihd]+)/);
-        const sMatch = link.match(/s([^uhid]+)/);
-        const hMatch = link.match(/h([^usid]+)/);
+        if (!link) return;
+
+        // 1. CLEAN THE LINK
+        // If it's a full URL, grab only the part after 'army='
+        // This prevents the 's' in 'https' from breaking the Spell detection
+        let armyString = link;
+        if (link.includes('army=')) {
+            armyString = link.split('army=')[1];
+        }
+
+        // 2. Extract Sections from the Clean String
+        // u = Army, s = Spells, h = Heroes. We ignore i/d (Clan Castle)
+        const uMatch = armyString.match(/u([^sihd]+)/);
+        const sMatch = armyString.match(/s([^uhid]+)/);
+        const hMatch = armyString.match(/h([^usid]+)/);
 
         if (uMatch) parseSegment(uMatch[1]);
         if (sMatch) parseSegment(sMatch[1]);
         
-        // Special logic for Hero Equipment (format: h0p1e10_12)
+        // 3. Special Logic for Hero Equipment
         if (hMatch) {
             const heroes = hMatch[1].split('-');
             heroes.forEach(hStr => {
@@ -260,15 +267,15 @@ export function App() {
         }
     });
 
-    // Apply Inflation Math to the aggregated counts
-    // Formula: (N * BasePrice) + (N * (N-1))
+    // 4. Calculate Total Cost
+    // Formula: (N * Base) + (N * (N-1))
     Object.keys(teamCounts).forEach(itemId => {
         const item = dbItems.find(i => i.id === itemId);
         if (item) {
             const n = teamCounts[itemId];
             const baseCost = item.base_price * n;
-            const inflation = n * (n - 1); 
-            grandTotal += (baseCost + inflation);
+            const inflationCost = n * (n - 1); 
+            grandTotal += baseCost + inflationCost;
         }
     });
 
