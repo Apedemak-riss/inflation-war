@@ -208,6 +208,73 @@ export function App() {
   const [refLinks, setRefLinks] = useState(['', '', '']);
   const [refResult, setRefResult] = useState<number | null>(null);
 
+  // --- REFEREE LOGIC ---
+  const handleRefereeCheck = () => {
+    let grandTotal = 0;
+    const teamCounts: Record<string, number> = {}; 
+
+    // Helper to parse "5x123-2x456" segments from a link
+    const parseSegment = (segment: string) => {
+        if (!segment) return;
+        const parts = segment.split('-');
+        parts.forEach(p => {
+            const [countStr, cocIdStr] = p.split('x');
+            if (!countStr || !cocIdStr) return;
+            const count = parseInt(countStr);
+            const cocId = parseInt(cocIdStr);
+            
+            // Match CoC ID (e.g., 4000013) to our DB item using modulo
+            const item = dbItems.find(i => (i.coc_id % 1000000) === (cocId % 1000000));
+            if (item) {
+                teamCounts[item.id] = (teamCounts[item.id] || 0) + count;
+            }
+        });
+    };
+
+    // Process each of the 3 link inputs
+    refLinks.forEach(link => {
+        if (!link || !link.includes('army=')) return;
+        
+        // Extract sections: u (Army), s (Spells), h (Heroes/Equipment)
+        // We ignore i/d because Clan Castle is 0 gold
+        const uMatch = link.match(/u([^sihd]+)/);
+        const sMatch = link.match(/s([^uhid]+)/);
+        const hMatch = link.match(/h([^usid]+)/);
+
+        if (uMatch) parseSegment(uMatch[1]);
+        if (sMatch) parseSegment(sMatch[1]);
+        
+        // Special logic for Hero Equipment (format: h0p1e10_12)
+        if (hMatch) {
+            const heroes = hMatch[1].split('-');
+            heroes.forEach(hStr => {
+                const eMatch = hStr.match(/e([0-9_]+)/);
+                if (eMatch) {
+                    const equipIds = eMatch[1].split('_').map(Number);
+                    equipIds.forEach(eqId => {
+                        const item = dbItems.find(i => i.type === 'equipment' && i.coc_id === eqId);
+                        if (item) teamCounts[item.id] = (teamCounts[item.id] || 0) + 1;
+                    });
+                }
+            });
+        }
+    });
+
+    // Apply Inflation Math to the aggregated counts
+    // Formula: (N * BasePrice) + (N * (N-1))
+    Object.keys(teamCounts).forEach(itemId => {
+        const item = dbItems.find(i => i.id === itemId);
+        if (item) {
+            const n = teamCounts[itemId];
+            const baseCost = item.base_price * n;
+            const inflation = n * (n - 1); 
+            grandTotal += (baseCost + inflation);
+        }
+    });
+
+    setRefResult(grandTotal);
+  };
+
   useEffect(() => { checkDatabase(); attemptRestoreSession(); }, []);
 
   const checkDatabase = async () => {
