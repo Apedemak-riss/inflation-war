@@ -22,6 +22,7 @@ type HeroType = 'BK' | 'AQ' | 'GW' | 'RC' | 'MP' | null;
 type Item = { 
   id: string; name: string; base_price: number; coc_id: number; 
   type: ItemType; hero?: HeroType; housing_space: number; 
+  inflation_rate: number; is_fixed: boolean;
 };
 
 // --- RAW DATA ---
@@ -211,7 +212,8 @@ export function App() {
 
   const seedDatabase = async () => {
     const rows = RAW_DATA.map(i => ({
-      id: i.name, name: i.name, type: i.type, hero: (i as any).hero || null, coc_id: i.dataId, base_price: 1, housing_space: (i as any).weight || 0
+      id: i.name, name: i.name, type: i.type, hero: (i as any).hero || null, coc_id: i.dataId, base_price: 1, housing_space: (i as any).weight || 0,
+      inflation_rate: 2, is_fixed: false
     }));
     await supabase.from('items').upsert(rows);
     const { data } = await supabase.from('items').select('*');
@@ -317,7 +319,7 @@ export function App() {
     }
     if (item.type === 'pet' && !targetHero && !isCC) { setPetModalItem(item); return; }
     
-    const p = isCC ? 0 : (item.type === 'pet' ? 0 : item.base_price + (teamPurchases.filter(x => x.item_id === item.id && !x.is_cc).length * 2));
+    const p = isCC ? 0 : (item.type === 'pet' ? 0 : (item.is_fixed ? item.base_price : item.base_price + (teamPurchases.filter(x => x.item_id === item.id && !x.is_cc).length * item.inflation_rate)));
     if (teamBudget < p) return alert("No budget");
 
     let cat: any = 'troop';
@@ -379,7 +381,10 @@ export function App() {
     Object.keys(teamCounts).forEach(id => {
         const item = dbItems.find(i => i.id === id);
         if (item) {
-            const n = teamCounts[id], base = item.base_price * n, infl = n * (n - 1), cost = base + infl;
+            const n = teamCounts[id];
+            const base = item.base_price * n;
+            const infl = item.is_fixed ? 0 : (n * (n - 1) * (item.inflation_rate / 2));
+            const cost = base + infl;
             grandTotal += cost;
             breakdown.push({ name: item.name, count: n, cost });
         }
@@ -419,7 +424,12 @@ export function App() {
   };
 
   // --- HELPERS FOR UI ---
-  const calcPrice = (base: number, id: string, isCC: boolean = false) => isCC ? 0 : (dbItems.find(i=>i.id===id)?.type==='pet'?0 : base+(teamPurchases.filter(p=>p.item_id===id && !p.is_cc).length*2));
+  const calcPrice = (item: Item, isCC: boolean = false) => {
+      if (isCC || item.type === 'pet') return 0;
+      if (item.is_fixed) return item.base_price;
+      const count = teamPurchases.filter(p => p.item_id === item.id && !p.is_cc).length;
+      return item.base_price + (count * item.inflation_rate);
+  };
   const getCurrentWeight = (cat: 'troop'|'spell'|'siege', isCC: boolean = false) => myPurchases.reduce((s,p)=>{ if(!!p.is_cc!==isCC)return s; const i=dbItems.find(x=>x.id===p.item_id); if(!i)return s; if(cat==='troop' && (i.type==='troop'||i.type==='super_troop'))return s+i.housing_space; if(cat==='spell' && i.type==='spell')return s+i.housing_space; if(cat==='siege' && i.type==='siege')return s+i.housing_space; return s; },0);
   const getMyCount = (id: string, isCC: boolean) => myPurchases.filter(p=>p.item_id===id && !!p.is_cc===isCC).length;
 
@@ -606,7 +616,7 @@ export function App() {
 
   const renderGrid = (list: Item[]) => (
     <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">{list.map(i => {
-        const p = calcPrice(i.base_price, i.id), qty = getMyCount(i.id, false), isOwned = i.type === 'equipment' && qty > 0, isOwnedPet = i.type === 'pet' && qty > 0;
+        const p = calcPrice(i), qty = getMyCount(i.id, false), isOwned = i.type === 'equipment' && qty > 0, isOwnedPet = i.type === 'pet' && qty > 0;
         const activeClass = (qty > 0 || isOwned || isOwnedPet) ? 'border-yellow-500/50 shadow-[0_0_20px_rgba(234,179,8,0.1)]' : 'border-white/5 hover:border-white/20 hover:shadow-lg hover:shadow-blue-500/5';
         
         return (
@@ -983,10 +993,15 @@ export function App() {
                         </p>
                     </div>
                 </div>
-                <button onClick={handleNuke} className="w-full md:w-auto group bg-red-600 hover:bg-red-500 px-6 py-3 md:px-8 md:py-4 rounded-xl font-black flex items-center justify-center gap-3 text-xs tracking-widest uppercase transition-all shadow-[0_0_30px_rgba(239,68,68,0.4)] hover:shadow-[0_0_50px_rgba(239,68,68,0.6)] hover:-translate-y-1 active:translate-y-0 relative overflow-hidden">
-                    <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
-                    <Trash2 size={18} className="relative z-10"/> <span className="relative z-10">Execute Global Purge</span>
-                </button>
+                <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
+                    <button onClick={() => setView('login')} className="w-full md:w-auto group bg-slate-800/80 hover:bg-slate-700 border border-white/10 hover:border-white/20 px-6 py-3 md:px-8 md:py-4 rounded-xl font-black flex items-center justify-center gap-3 text-xs tracking-widest uppercase transition-all shadow-lg hover:shadow-xl active:scale-95">
+                        <LogOut size={18} className="text-slate-400 group-hover:text-white transition-colors"/> <span className="text-slate-400 group-hover:text-white transition-colors">Disconnect</span>
+                    </button>
+                    <button onClick={handleNuke} className="w-full md:w-auto group bg-red-600 hover:bg-red-500 px-6 py-3 md:px-8 md:py-4 rounded-xl font-black flex items-center justify-center gap-3 text-xs tracking-widest uppercase transition-all shadow-[0_0_30px_rgba(239,68,68,0.4)] hover:shadow-[0_0_50px_rgba(239,68,68,0.6)] hover:-translate-y-1 active:translate-y-0 relative overflow-hidden">
+                        <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
+                        <Trash2 size={18} className="relative z-10"/> <span className="relative z-10">Execute Global Purge</span>
+                    </button>
+                </div>
             </header>
             
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-10">
