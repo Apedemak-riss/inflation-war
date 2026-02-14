@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { Shield, Sword, ShoppingCart, Coins, ExternalLink, Hammer, Crown, Minus, Check, Users, RefreshCw, Trash2, Trophy, ArrowRightLeft, LogOut, Gavel, ClipboardCheck, AlertTriangle, Loader2, Edit2, Save, X, Tv, PawPrint, Castle, Terminal, ChevronRight, Wifi, Lock, Zap, Skull, Hexagon, Crosshair } from 'lucide-react';
+import { Shield, Sword, ShoppingCart, Coins, ExternalLink, Hammer, Crown, Minus, Check, Users, RefreshCw, Trash2, Trophy, ArrowRightLeft, LogOut, Gavel, ClipboardCheck, AlertTriangle, Loader2, Edit2, Save, X, Tv, PawPrint, Castle, Terminal, ChevronRight, Wifi, Lock, Zap, Skull, Hexagon, Crosshair, Settings } from 'lucide-react';
 
 // --- CONFIGURATION ---
 const ADMIN_PREFIX = "op:"; 
@@ -23,6 +23,7 @@ type Item = {
   id: string; name: string; base_price: number; coc_id: number; 
   type: ItemType; hero?: HeroType; housing_space: number; 
   inflation_rate: number; is_fixed: boolean;
+  inflation_type?: 'linear' | 'exponential' | 'flat';
 };
 
 // --- RAW DATA ---
@@ -201,6 +202,14 @@ export function App() {
   const [refLinks, setRefLinks] = useState(['', '', '']);
   const [refResult, setRefResult] = useState<number | null>(null);
   const [refBreakdown, setRefBreakdown] = useState<any[]>([]);
+  const [showSandbox, setShowSandbox] = useState(false);
+
+  const handleUpdateItem = async (itemId: string, newBase: number, newInf: number, infType: string) => {
+      setIsProcessing(true);
+      await supabase.from('items').update({ base_price: newBase, inflation_rate: newInf, inflation_type: infType, is_fixed: infType === 'flat' }).eq('id', itemId);
+      await checkDatabase(); 
+      setIsProcessing(false);
+  };
 
   // --- INIT ---
   useEffect(() => { checkDatabase(); attemptRestoreSession(); }, []);
@@ -319,7 +328,12 @@ export function App() {
     }
     if (item.type === 'pet' && !targetHero && !isCC) { setPetModalItem(item); return; }
     
-    const p = isCC ? 0 : (item.type === 'pet' ? 0 : (item.is_fixed ? item.base_price : item.base_price + (teamPurchases.filter(x => x.item_id === item.id && !x.is_cc).length * item.inflation_rate)));
+    const count = teamPurchases.filter(x => x.item_id === item.id && !x.is_cc).length;
+    const p = isCC ? 0 : (item.type === 'pet' ? 0 : (
+        (item.is_fixed || item.inflation_type === 'flat') ? item.base_price : 
+        (item.inflation_type === 'exponential' ? item.base_price * Math.pow((item.inflation_rate || 2), count) : 
+        item.base_price + (count * (item.inflation_rate || 2)))
+    ));
     if (teamBudget < p) return alert("No budget");
 
     let cat: any = 'troop';
@@ -382,9 +396,16 @@ export function App() {
         const item = dbItems.find(i => i.id === id);
         if (item) {
             const n = teamCounts[id];
-            const base = item.base_price * n;
-            const infl = item.is_fixed ? 0 : (n * (n - 1) * (item.inflation_rate / 2));
-            const cost = base + infl;
+            let cost = 0;
+            if (item.is_fixed || item.inflation_type === 'flat') {
+                cost = item.base_price * n;
+            } else if (item.inflation_type === 'exponential') {
+                const rate = item.inflation_rate || 2;
+                cost = rate === 1 ? (item.base_price * n) : item.base_price * ((Math.pow(rate, n) - 1) / (rate - 1));
+            } else {
+                const rate = item.inflation_rate || 2;
+                cost = (item.base_price * n) + (rate * (n * (n - 1)) / 2);
+            }
             grandTotal += cost;
             breakdown.push({ name: item.name, count: n, cost });
         }
@@ -426,9 +447,10 @@ export function App() {
   // --- HELPERS FOR UI ---
   const calcPrice = (item: Item, isCC: boolean = false) => {
       if (isCC || item.type === 'pet') return 0;
-      if (item.is_fixed) return item.base_price;
+      if (item.is_fixed || item.inflation_type === 'flat') return item.base_price;
       const count = teamPurchases.filter(p => p.item_id === item.id && !p.is_cc).length;
-      return item.base_price + (count * item.inflation_rate);
+      if (item.inflation_type === 'exponential') return item.base_price * Math.pow((item.inflation_rate || 2), count);
+      return item.base_price + (count * (item.inflation_rate || 2));
   };
   const getCurrentWeight = (cat: 'troop'|'spell'|'siege', isCC: boolean = false) => myPurchases.reduce((s,p)=>{ if(!!p.is_cc!==isCC)return s; const i=dbItems.find(x=>x.id===p.item_id); if(!i)return s; if(cat==='troop' && (i.type==='troop'||i.type==='super_troop'))return s+i.housing_space; if(cat==='spell' && i.type==='spell')return s+i.housing_space; if(cat==='siege' && i.type==='siege')return s+i.housing_space; return s; },0);
   const getMyCount = (id: string, isCC: boolean) => myPurchases.filter(p=>p.item_id===id && !!p.is_cc===isCC).length;
@@ -997,12 +1019,92 @@ export function App() {
                     <button onClick={() => setView('login')} className="w-full md:w-auto group bg-slate-800/80 hover:bg-slate-700 border border-white/10 hover:border-white/20 px-6 py-3 md:px-8 md:py-4 rounded-xl font-black flex items-center justify-center gap-3 text-xs tracking-widest uppercase transition-all shadow-lg hover:shadow-xl active:scale-95">
                         <LogOut size={18} className="text-slate-400 group-hover:text-white transition-colors"/> <span className="text-slate-400 group-hover:text-white transition-colors">Disconnect</span>
                     </button>
-                    <button onClick={handleNuke} className="w-full md:w-auto group bg-red-600 hover:bg-red-500 px-6 py-3 md:px-8 md:py-4 rounded-xl font-black flex items-center justify-center gap-3 text-xs tracking-widest uppercase transition-all shadow-[0_0_30px_rgba(239,68,68,0.4)] hover:shadow-[0_0_50px_rgba(239,68,68,0.6)] hover:-translate-y-1 active:translate-y-0 relative overflow-hidden">
-                        <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
-                        <Trash2 size={18} className="relative z-10"/> <span className="relative z-10">Execute Global Purge</span>
-                    </button>
+                    <div className="flex flex-col md:flex-row gap-4 w-full md:w-auto">
+                        <button onClick={() => setShowSandbox(!showSandbox)} className="w-full md:w-auto group bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/30 px-6 py-3 md:px-8 md:py-4 rounded-xl font-black flex items-center justify-center gap-3 text-xs tracking-widest uppercase transition-all shadow-lg text-blue-400 hover:text-blue-300 active:scale-95">
+                            <Settings size={18} className="group-hover:rotate-90 transition-transform duration-500"/> <span>{showSandbox ? 'Close Sandbox' : 'Economy Sandbox'}</span>
+                        </button>
+                        <button onClick={handleNuke} className="w-full md:w-auto group bg-red-600 hover:bg-red-500 px-6 py-3 md:px-8 md:py-4 rounded-xl font-black flex items-center justify-center gap-3 text-xs tracking-widest uppercase transition-all shadow-[0_0_30px_rgba(239,68,68,0.4)] hover:shadow-[0_0_50px_rgba(239,68,68,0.6)] hover:-translate-y-1 active:translate-y-0 relative overflow-hidden">
+                            <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
+                            <Trash2 size={18} className="relative z-10"/> <span className="relative z-10">Execute Global Purge</span>
+                        </button>
+                    </div>
                 </div>
             </header>
+            
+            {showSandbox && (
+                <div className="glass border border-blue-500/30 rounded-[2.5rem] p-6 md:p-10 mb-10 shadow-[0_0_50px_rgba(59,130,246,0.15)] relative overflow-hidden bg-[#0a101f]/95 backdrop-blur-xl animate-slide-up">
+                    <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500/10 rounded-full blur-[100px] pointer-events-none"></div>
+                    <div className="flex items-center gap-4 mb-8 border-b border-blue-500/20 pb-6 relative z-10">
+                        <div className="p-3 bg-blue-500/20 rounded-xl border border-blue-500/30"><Settings className="text-blue-400 w-8 h-8"/></div>
+                        <div>
+                            <h2 className="text-2xl md:text-3xl font-black text-blue-100 tracking-tighter drop-shadow-md">ECONOMY TUNING SANDBOX</h2>
+                            <p className="text-blue-400/60 font-bold uppercase tracking-widest text-[10px] mt-1">Live Database Override Controls</p>
+                        </div>
+                    </div>
+                    <div className="overflow-x-auto custom-scrollbar relative z-10 max-h-[700px] bg-black/20 rounded-2xl">
+                        {[
+                            { title: 'EQUIPMENT', types: ['equipment'] },
+                            { title: 'TROOPS', types: ['troop', 'super_troop'] },
+                            { title: 'SPELLS', types: ['spell'] },
+                            { title: 'SIEGES', types: ['siege'] }
+                        ].map(category => {
+                            const catItems = dbItems.filter(i => category.types.includes(i.type));
+                            if (catItems.length === 0) return null;
+                            return (
+                                <div key={category.title} className="mb-8 bg-[#0a101f]/80 rounded-2xl border border-white/5 shadow-inner overflow-hidden">
+                                    <div className="bg-blue-900/20 px-6 py-4 border-b border-blue-500/20">
+                                        <h3 className="text-xl font-black text-blue-400 tracking-widest uppercase">{category.title}</h3>
+                                    </div>
+                                    <table className="w-full text-left border-collapse min-w-[800px]">
+                                        <thead className="bg-black/40">
+                                            <tr className="border-b border-white/5 text-slate-400 text-[10px] font-black uppercase tracking-[0.2em]">
+                                                <th className="p-4 pl-8">Asset Name</th>
+                                                <th className="p-4 text-center">Base Price (g)</th>
+                                                <th className="p-4 text-center">Inflation Rate</th>
+                                                <th className="p-4 text-center">Equation Type</th>
+                                                <th className="p-4 text-right pr-8">Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-white/5 text-sm">
+                                            {catItems.map(item => (
+                                                <tr key={item.id} className="hover:bg-blue-500/5 transition-colors group">
+                                                    <td className="p-4 pl-8 font-bold text-slate-200 flex items-center gap-3">
+                                                        <img src={getImageUrl(item.name, item.type, item.hero)} className="w-8 h-8 object-contain bg-black/40 rounded border border-white/10 p-1" alt=""/>
+                                                        {item.name}
+                                                    </td>
+                                                    <td className="p-4 text-center">
+                                                        <input id={`base-${item.id}`} type="number" defaultValue={item.base_price} className="w-20 bg-black/60 border border-white/10 rounded-lg p-2 text-center text-yellow-400 font-mono font-bold outline-none focus:border-blue-500 transition-colors" />
+                                                    </td>
+                                                    <td className="p-4 text-center">
+                                                        <input id={`inf-${item.id}`} type="number" defaultValue={item.inflation_rate} className="w-20 bg-black/60 border border-white/10 rounded-lg p-2 text-center text-red-400 font-mono font-bold outline-none focus:border-blue-500 transition-colors" />
+                                                    </td>
+                                                    <td className="p-4 text-center">
+                                                        <select id={`type-${item.id}`} defaultValue={item.inflation_type || (item.is_fixed ? 'flat' : 'linear')} className="bg-black/60 border border-white/10 rounded-lg p-2 text-center text-purple-400 font-mono font-bold outline-none focus:border-blue-500 cursor-pointer">
+                                                            <option value="linear">Linear (Add)</option>
+                                                            <option value="exponential">Exponential (Multiply)</option>
+                                                            <option value="flat">Flat (Fixed Price)</option>
+                                                        </select>
+                                                    </td>
+                                                    <td className="p-4 text-right pr-8">
+                                                        <button disabled={isProcessing} onClick={() => {
+                                                            const b = parseInt((document.getElementById(`base-${item.id}`) as HTMLInputElement).value);
+                                                            const i = parseInt((document.getElementById(`inf-${item.id}`) as HTMLInputElement).value);
+                                                            const t = (document.getElementById(`type-${item.id}`) as HTMLSelectElement).value;
+                                                            handleUpdateItem(item.id, b, i, t);
+                                                        }} className="bg-blue-500/10 border border-blue-500/30 text-blue-400 px-5 py-2.5 rounded-lg hover:bg-blue-500 hover:text-white transition-all text-[10px] font-black uppercase tracking-widest shadow-sm active:scale-95 disabled:opacity-50 opacity-0 group-hover:opacity-100">
+                                                            Deploy
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
             
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-10">
                 {lobbyTeams.map(team => (
