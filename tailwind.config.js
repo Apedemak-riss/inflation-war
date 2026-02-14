@@ -4,6 +4,10 @@ export default {
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
+  safelist: [
+    { pattern: /(text|bg|border)-(blue|orange|purple|red|green)-(400|500|600)(\/.*)?/ },
+    { pattern: /border-(blue|orange|purple|red|green)-500\/50/, variants: ['hover'] }
+  ],
   theme: {
     extend: {
       fontFamily: {
