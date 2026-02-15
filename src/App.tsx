@@ -1020,9 +1020,11 @@ export function App() {
                         <LogOut size={18} className="text-slate-400 group-hover:text-white transition-colors"/> <span className="text-slate-400 group-hover:text-white transition-colors">Disconnect</span>
                     </button>
                     <div className="flex flex-col md:flex-row gap-4 w-full md:w-auto">
-                        <button onClick={() => setShowSandbox(!showSandbox)} className="w-full md:w-auto group bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/30 px-6 py-3 md:px-8 md:py-4 rounded-xl font-black flex items-center justify-center gap-3 text-xs tracking-widest uppercase transition-all shadow-lg text-blue-400 hover:text-blue-300 active:scale-95">
-                            <Settings size={18} className="group-hover:rotate-90 transition-transform duration-500"/> <span>{showSandbox ? 'Close Sandbox' : 'Economy Sandbox'}</span>
-                        </button>
+                        {import.meta.env.VITE_ENABLE_SANDBOX === 'true' && (
+                            <button onClick={() => setShowSandbox(!showSandbox)} className="w-full md:w-auto group bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/30 px-6 py-3 md:px-8 md:py-4 rounded-xl font-black flex items-center justify-center gap-3 text-xs tracking-widest uppercase transition-all shadow-lg text-blue-400 hover:text-blue-300 active:scale-95">
+                                <Settings size={18} className="group-hover:rotate-90 transition-transform duration-500"/> <span>{showSandbox ? 'Close Sandbox' : 'Economy Sandbox'}</span>
+                            </button>
+                        )}
                         <button onClick={handleNuke} className="w-full md:w-auto group bg-red-600 hover:bg-red-500 px-6 py-3 md:px-8 md:py-4 rounded-xl font-black flex items-center justify-center gap-3 text-xs tracking-widest uppercase transition-all shadow-[0_0_30px_rgba(239,68,68,0.4)] hover:shadow-[0_0_50px_rgba(239,68,68,0.6)] hover:-translate-y-1 active:translate-y-0 relative overflow-hidden">
                             <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
                             <Trash2 size={18} className="relative z-10"/> <span className="relative z-10">Execute Global Purge</span>
@@ -1031,7 +1033,7 @@ export function App() {
                 </div>
             </header>
             
-            {showSandbox && (
+            {import.meta.env.VITE_ENABLE_SANDBOX === 'true' && showSandbox && (
                 <div className="glass border border-blue-500/30 rounded-[2.5rem] p-6 md:p-10 mb-10 shadow-[0_0_50px_rgba(59,130,246,0.15)] relative overflow-hidden bg-[#0a101f]/95 backdrop-blur-xl animate-slide-up">
                     <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500/10 rounded-full blur-[100px] pointer-events-none"></div>
                     <div className="flex items-center gap-4 mb-8 border-b border-blue-500/20 pb-6 relative z-10">
