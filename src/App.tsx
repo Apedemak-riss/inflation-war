@@ -175,6 +175,37 @@ const getImageUrl = (name: string, type: string, hero?: string | null) => {
   return `${REPO_ROOT}/troops/${cn}/${cn}-icon.png`;
 };
 
+// --- VISUAL COMPONENTS ---
+const NumberTicker = ({ value, duration = 500 }: { value: number, duration?: number }) => {
+    const [displayValue, setDisplayValue] = useState(value);
+    
+    useEffect(() => {
+        let start = displayValue;
+        const end = value;
+        if (start === end) return;
+        
+        const startTime = performance.now();
+        const update = (currentTime: number) => {
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            
+            // Ease out quart
+            const ease = 1 - Math.pow(1 - progress, 4);
+            
+            const current = start + (end - start) * ease;
+            setDisplayValue(Math.round(current));
+            
+            if (progress < 1) {
+                requestAnimationFrame(update);
+            }
+        };
+        
+        requestAnimationFrame(update);
+    }, [value, duration]);
+    
+    return <>{displayValue}</>;
+};
+
 // --- COMPONENT ---
 export function App() {
   const [view, setView] = useState<View>('login');
@@ -202,7 +233,9 @@ export function App() {
   const [refLinks, setRefLinks] = useState(['', '', '']);
   const [refResult, setRefResult] = useState<number | null>(null);
   const [refBreakdown, setRefBreakdown] = useState<any[]>([]);
+
   const [showSandbox, setShowSandbox] = useState(false);
+  const [poppingItem, setPoppingItem] = useState<string | null>(null);
 
   const handleUpdateItem = async (itemId: string, newBase: number, newInf: number, infType: string) => {
       setIsProcessing(true);
@@ -353,6 +386,7 @@ export function App() {
     }
 
     setIsProcessing(true); setPetModalItem(null);
+    setPoppingItem(item.id); setTimeout(() => setPoppingItem(null), 250);
     await supabase.rpc('buy_item', { p_player_id: playerId, p_item_id: item.id, p_target_hero: targetHero, p_is_cc: isCC });
     fetchGameState(); setIsProcessing(false);
   };
@@ -588,7 +622,7 @@ export function App() {
   const renderCCShop = () => {
       const renderMiniGrid = (list: Item[]) => (
           <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-2">{list.map(i => { const count = getMyCount(i.id, true); return (
-              <div key={i.id} className="relative group perspective-500">
+              <div key={i.id} className={`relative group perspective-500 ${poppingItem === i.id ? 'animate-pop' : ''}`}>
                   <div onClick={() => handleBuy(i, null, true)} className="cursor-pointer hover:transform hover:rotate-x-12 transition-all duration-300 bg-[#0a101f] rounded-lg border border-white/5 hover:border-orange-500/50 aspect-square p-1.5 relative overflow-hidden shadow-black/50 shadow-lg" title={i.name}>
                       <img src={getImageUrl(i.name, i.type)} className="w-full h-full object-contain drop-shadow-md group-hover:scale-110 transition-transform" />
                   </div>
@@ -642,7 +676,7 @@ export function App() {
         const activeClass = (qty > 0 || isOwned || isOwnedPet) ? 'border-yellow-500/50 shadow-[0_0_20px_rgba(234,179,8,0.1)]' : 'border-white/5 hover:border-white/20 hover:shadow-lg hover:shadow-blue-500/5';
         
         return (
-           <div key={i.id} className={`bg-[#0a101f] rounded-2xl p-4 flex flex-col justify-between transition-all duration-300 group relative overflow-hidden border ${activeClass}`}>
+           <div key={i.id} className={`bg-[#0a101f] rounded-2xl p-4 flex flex-col justify-between transition-all duration-300 group relative overflow-hidden border ${activeClass} ${poppingItem === i.id ? 'animate-pop' : ''}`}>
                 
                 {/* Background Glow for Hero Items */}
                 {i.hero && <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"/>}
@@ -694,7 +728,7 @@ export function App() {
           
           <div className="max-w-md w-full relative z-10 animate-slide-up group">
             <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 via-purple-600 to-yellow-600 rounded-[2rem] opacity-30 blur-lg group-hover:opacity-60 transition duration-1000"></div>
-            <div className="glass p-1 p-6 lg:p-10 rounded-[2rem] text-center relative shadow-2xl border border-white/10 bg-black/40 backdrop-blur-xl">
+            <div className="glass p-1 p-6 lg:p-10 rounded-[2rem] text-center relative shadow-2xl border border-white/10 bg-black/40 backdrop-blur-xl will-change-transform">
                 <div className="absolute -top-16 left-1/2 -translate-x-1/2">
                     <div className="relative w-24 h-24 lg:w-32 lg:h-32 flex items-center justify-center">
                         <div className="absolute inset-0 bg-blue-500 blur-[60px] opacity-40 rounded-full animate-pulse-slow"></div>
@@ -1128,8 +1162,8 @@ export function App() {
                                     </div>
                                 </h2>
                             )}
-                            <div className="glass px-6 py-3 rounded-2xl border border-yellow-500/30 font-mono text-yellow-500 text-3xl font-black shadow-[0_0_30px_rgba(234,179,8,0.1)] flex items-center gap-3">
-                                {team.budget} <Coins className="w-6 h-6 opacity-80 mb-1"/>
+                            <div className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-yellow-500 drop-shadow-[0_2px_10px_rgba(234,179,8,0.5)] font-mono tracking-tighter">
+                                <NumberTicker value={team.budget} /> <span className="text-2xl text-yellow-500/80">GOLD</span>
                             </div>
                         </div>
                         
@@ -1177,7 +1211,7 @@ export function App() {
       
       {petModalItem && (
           <div className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-4 backdrop-blur-xl animate-fade-in" onClick={() => setPetModalItem(null)}>
-              <div className="glass border border-white/10 rounded-[2.5rem] p-10 w-full max-w-3xl shadow-2xl animate-slide-up relative overflow-hidden bg-[#0a101f]" onClick={e => e.stopPropagation()}>
+              <div className="glass border border-white/10 rounded-[2.5rem] p-10 w-full max-w-3xl shadow-2xl animate-slide-up relative overflow-hidden bg-[#0a101f] will-change-transform" onClick={e => e.stopPropagation()}>
                   <div className="absolute top-0 right-0 w-64 h-64 bg-green-500/10 rounded-full blur-[100px] pointer-events-none"></div>
                   <h3 className="text-4xl font-black mb-10 tracking-tighter text-center flex items-center justify-center gap-4">
                       DEPLOY <span className="text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-emerald-600">{petModalItem.name.toUpperCase()}</span>
@@ -1233,7 +1267,7 @@ export function App() {
                 </div>
                 
                 <div className="bg-black/40 px-4 py-2 lg:pl-6 lg:pr-5 lg:py-3 rounded-full border border-yellow-500/30 flex items-center gap-2 lg:gap-4 shadow-[0_0_20px_rgba(234,179,8,0.15)] backdrop-blur-md group hover:border-yellow-500/50 transition-colors">
-                    <div className="text-2xl lg:text-3xl font-black font-mono text-yellow-500 tracking-tighter drop-shadow-sm group-hover:scale-110 transition-transform origin-right">{teamBudget}</div>
+                    <div className="text-2xl lg:text-3xl font-black font-mono text-yellow-500 tracking-tighter drop-shadow-sm group-hover:scale-110 transition-transform origin-right w-[80px] text-right"><NumberTicker value={teamBudget} /></div>
                     <Coins className="text-yellow-400 drop-shadow-[0_0_10px_rgba(234,179,8,0.5)] w-5 h-5 lg:w-6 lg:h-6"/>
                 </div>
                 
@@ -1388,7 +1422,7 @@ export function App() {
                     return (
                         <div key={type} className="mb-6 lg:mb-8">
                             <h3 className={`text-[10px] font-black text-${color}-500 uppercase tracking-[0.2em] mb-3 lg:mb-4 flex items-center gap-2 after:h-px after:flex-1 after:bg-${color}-500/20`}>{type}s</h3>
-                            <div className="grid grid-cols-4 gap-2 lg:gap-3">
+                            <div className="grid grid-cols-4 gap-2 lg:gap-3 will-change-transform">
                                 {list.map(i => (
                                     <div key={i.id} className={`relative glass rounded-xl border border-white/5 aspect-square shadow-sm overflow-hidden group hover:border-${color}-500/50 transition-colors`}>
                                         <div className={`absolute inset-0 bg-${color}-500/10 opacity-0 group-hover:opacity-100 transition-opacity`}></div>
