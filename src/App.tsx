@@ -530,7 +530,24 @@ function AppContent() {
   };
 
   const handleSell = async (item: Item) => { await supabase.rpc('sell_item', { p_player_id: playerId, p_item_id: item.id }); fetchGameState(); };
-  const handleLeave = async () => { if(confirm("Leave?")) { localStorage.clear(); navigate('/'); if(playerId) await supabase.rpc('leave_team', { p_player_id: playerId }); }};
+  const handleLeave = async () => { 
+    if(confirm("Are you sure you want to leave the match? converting all your assets back to gold for the team...")) { 
+        setIsProcessing(true);
+        if(playerId) {
+            await supabase.rpc('clear_player_army', { p_player_id: playerId });
+            await supabase.rpc('leave_team', { p_player_id: playerId }); 
+        }
+        localStorage.removeItem('iw_pid');
+        localStorage.removeItem('iw_tid');
+        localStorage.removeItem('iw_lobby');
+        setPlayerId(null);
+        setTeamId(null);
+        setFoundLobby(null);
+        setLobbyCode('');
+        setIsProcessing(false);
+        navigate('/'); 
+    }
+  };
 
   const handleClearArmy = async () => {
       if (myPurchases.length === 0) return;
