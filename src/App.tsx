@@ -1,21 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
-import { Shield, Sword, ShoppingCart, Coins, ExternalLink, Hammer, Crown, Minus, Check, Users, RefreshCw, Trash2, Trophy, ArrowRightLeft, LogOut, Gavel, ClipboardCheck, AlertTriangle, Loader2, Edit2, Save, X, Tv, PawPrint, Castle, Terminal, ChevronRight, Wifi, Lock, Zap, Skull, Hexagon, Crosshair, Settings } from 'lucide-react';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ProtectedRoute } from './components/ProtectedRoute';
+import { LoginView } from './components/LoginView';
+import { CallsignModal } from './components/CallsignModal';
+import { ProfileBadge } from './components/ProfileBadge';
+import { UserSettings } from './components/UserSettings';
+
+import { Shield, Sword, Coins, ExternalLink, Hammer, Crown, Minus, Check, Users, RefreshCw, Trash2, Trophy, ArrowRightLeft, LogOut, Gavel, MonitorPlay, ClipboardCheck, AlertTriangle, Loader2, Edit2, Save, X, Tv, PawPrint, Castle, Terminal, Wifi, Lock, Zap, Skull, Hexagon, Crosshair, Settings } from 'lucide-react';
 
 // --- CONFIGURATION ---
-const ADMIN_PREFIX = "op:"; 
+
 const STREAMER_PREFIX = "streamer:";
 const HERO_LINK_IDS: Record<string, number> = { BK: 0, AQ: 1, GW: 2, RC: 4, MP: 6 };
 const LIMITS = { troop: 340, siege: 3, spell: 11 };
 const CC_LIMITS = { troop: 55, siege: 2, spell: 4 };
 
-// --- SUPABASE CLIENT ---
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
+
 
 // --- TYPES ---
-type View = 'login' | 'select-team' | 'game' | 'moderator' | 'streamer' | 'referee';
+type View = 'login' | 'auth' | 'select-team' | 'game' | 'moderator' | 'streamer' | 'referee' | 'settings';
 type ItemType = 'troop' | 'siege' | 'spell' | 'super_troop' | 'equipment' | 'pet';
 type HeroType = 'BK' | 'AQ' | 'GW' | 'RC' | 'MP' | null;
 
@@ -206,9 +209,13 @@ const NumberTicker = ({ value, duration = 500 }: { value: number, duration?: num
     return <>{displayValue}</>;
 };
 
+
+
 // --- COMPONENT ---
-export function App() {
+function AppContent() {
+  const { user, profile, loading, supabase } = useAuth();
   const [view, setView] = useState<View>('login');
+  const [previousView, setPreviousView] = useState<View>('login');
   const [lobbyCode, setLobbyCode] = useState('');
   const [playerName, setPlayerName] = useState('');
   
@@ -229,6 +236,9 @@ export function App() {
   const [myPurchases, setMyPurchases] = useState<any[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isRestoring, setIsRestoring] = useState(true);
+  const [modLoading, setModLoading] = useState(false);
+  const [deployLoading, setDeployLoading] = useState(false);
+  const [streamerLoading, setStreamerLoading] = useState(false);
   
   const [refLinks, setRefLinks] = useState(['', '', '']);
   const [refResult, setRefResult] = useState<number | null>(null);
@@ -282,31 +292,148 @@ export function App() {
     if (teams) setLobbyTeams(teams);
   };
 
-  const handleFindLobby = async (e: React.FormEvent) => {
-    e.preventDefault();
-    let code = lobbyCode.trim(); let mode: View = 'select-team';
-    if (code.toLowerCase().startsWith(ADMIN_PREFIX.toLowerCase())) {
-      const suffix = code.substring(ADMIN_PREFIX.length).toLowerCase();
-      if (suffix === 'referee') { setView('referee'); return; }
-      mode = 'moderator'; code = code.substring(ADMIN_PREFIX.length).toUpperCase();
-    } else if (code.toLowerCase().startsWith(STREAMER_PREFIX.toLowerCase())) {
+  const handleFindLobby = async (e?: React.FormEvent | View, modeArg?: View, retryCount = 0) => {
+    let mode: View = modeArg || 'select-team';
+    if (e && typeof e === 'object' && 'preventDefault' in e) {
+        e.preventDefault();
+    } else if (typeof e === 'string') {
+        mode = e;
+    }
+
+    let code = lobbyCode.trim().toUpperCase();
+    if (code.toLowerCase().startsWith(STREAMER_PREFIX.toLowerCase())) {
       mode = 'streamer'; code = code.substring(STREAMER_PREFIX.length).toUpperCase();
-    } else { code = code.toUpperCase(); }
+    }
     setLobbyCode(code);
-    let { data: lobby } = await supabase.from('lobbies').select('*').eq('code', code).single();
-    if (mode === 'moderator' && !lobby) {
-       const { data: nl } = await supabase.from('lobbies').insert({ code }).select().single();
-       lobby = nl; await supabase.from('teams').insert([{ lobby_id: nl.id, name: 'Team 1', budget: 100 }, { lobby_id: nl.id, name: 'Team 2', budget: 100 }]);
-    } else if (!lobby) return alert("Not found");
-    setFoundLobby(lobby); fetchTeams(lobby.id); setView(mode);
+
+    // Pick the right loading setter for this button
+    const setLoading = mode === 'streamer' ? setStreamerLoading : setDeployLoading;
+    setLoading(true);
+
+    // Helper to race promise against timeout
+    const withTimeout = async <T,>(promise: PromiseLike<T>, ms: number = 5000): Promise<T> => {
+        return Promise.race([
+            Promise.resolve(promise),
+            new Promise<T>((_, reject) => setTimeout(() => reject(new Error('Request timed out')), ms))
+        ]);
+    };
+
+    try {
+      let { data: lobby } = await withTimeout<any>(supabase.from('lobbies').select('*').eq('code', code).single());
+      if (mode === 'moderator' && !lobby) {
+         const { data: nl } = await withTimeout<any>(supabase.from('lobbies').insert({ code }).select().single());
+         lobby = nl; await withTimeout(supabase.from('teams').insert([{ lobby_id: nl.id, name: 'Team 1', budget: 100 }, { lobby_id: nl.id, name: 'Team 2', budget: 100 }]));
+      } else if (!lobby) { setLoading(false); return alert("Not found"); }
+      setFoundLobby(lobby); fetchTeams(lobby.id); setView(mode);
+    } catch (err: any) {
+      console.error('[FindLobby] Error:', err);
+      const isAbort = (err instanceof DOMException && err.name === 'AbortError') ||
+                      (err?.message?.includes('AbortError')) ||
+                      (err?.message?.includes('timed out'));
+      if (isAbort && retryCount < 1) {
+        console.warn('[FindLobby] Timeout — retrying...');
+        await new Promise(r => setTimeout(r, 500));
+        setLoading(false);
+        return handleFindLobby(mode, modeArg, retryCount + 1);
+      }
+      alert('Error: ' + (err?.message || 'Unknown error'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleModeratorAccess = async (retryCount = 0) => {
+    const code = lobbyCode.trim().toUpperCase();
+    if (!code) return alert('Enter a Lobby ID first.');
+    
+    if (!profile || profile.role !== 'moderator') {
+        return alert("ACCESS DENIED: Insufficient Security Clearance. Moderator privileges required.");
+    }
+
+    console.log('[ModAccess] Starting lobby creation for:', code, 'Retry:', retryCount);
+    
+    setModLoading(true);
+    
+    // Helper to race promise against timeout
+    const withTimeout = async <T,>(promise: PromiseLike<T>, ms: number = 5000): Promise<T> => {
+        return Promise.race([
+            Promise.resolve(promise),
+            new Promise<T>((_, reject) => setTimeout(() => reject(new Error('Request timed out')), ms))
+        ]);
+    };
+
+    try {
+      setLobbyCode(code);
+      
+      // 1. Try to find existing lobby
+      console.log('[ModAccess] Finding lobby...');
+      let { data: lobby } = await withTimeout<any>(supabase.from('lobbies').select('*').eq('code', code).single());
+
+      // 2. Create if not found
+      if (!lobby) {
+        console.log('[ModAccess] Lobby not found. Creating...');
+        const { data: nl, error: insertErr } = await withTimeout<any>(supabase.from('lobbies').insert({ code }).select().single());
+        
+        if (insertErr) {
+          if (insertErr.code === '23505') {
+            console.warn('[ModAccess] Conflict (23505). Fetching existing...');
+            // Unique constraint -> re-fetch
+            const refetch = await withTimeout<any>(supabase.from('lobbies').select('*').eq('code', code).single());
+            lobby = refetch.data;
+          } else {
+            throw insertErr;
+          }
+        } else {
+          console.log('[ModAccess] Lobby created. seeding teams...');
+          lobby = nl;
+          // Create default teams (we don't strictly need to await this for the view switch, but safer)
+          await withTimeout(supabase.from('teams').insert([
+            { lobby_id: nl.id, name: 'Team 1', budget: 100 },
+            { lobby_id: nl.id, name: 'Team 2', budget: 100 },
+          ]));
+        }
+      }
+
+      if (!lobby) throw new Error('Could not verify lobby');
+
+      console.log('[ModAccess] Success. Found lobby:', lobby);
+      setFoundLobby(lobby);
+      fetchTeams(lobby.id); // Fire and forget updater
+      setView('moderator');
+      
+    } catch (err: any) {
+      console.error('[ModAccess] Error:', err);
+      
+      // AbortError / Web Lock / Timeout retry logic
+      const isAbort = (err instanceof DOMException && err.name === 'AbortError') ||
+                      (err?.message?.includes('AbortError')) ||
+                      (err?.message?.includes('navigator.locks')) ||
+                      (err?.message?.includes('timed out'));
+
+      if (isAbort && retryCount < 1) {
+        console.warn('[ModAccess] AbortError check... retrying...');
+        await new Promise(r => setTimeout(r, 500));
+        return handleModeratorAccess(retryCount + 1);
+      }
+      
+      if (err.message?.includes('row-level security') || err.message?.includes('violates row-level security policy')) {
+          alert('ACCESS DENIED: Database policy violation. Ensure you have Moderator privileges.');
+      } else {
+          alert('Error: ' + (err?.message || 'Unknown error'));
+      }
+      
+    } finally {
+      setModLoading(false);
+    }
   };
 
   const handleJoinTeam = async (tName: string) => {
-    if (!playerName) return alert("Enter name!");
+    const nameToUse = (profile && profile.username && !profile.username.startsWith('Recruit_')) ? profile.username : playerName;
+    if (!nameToUse) return alert("Enter name!");
     const team = lobbyTeams.find(t => t.name === tName);
     if (team?.players && team.players.length >= 3) return alert("Full!");
     const { data: tIdData } = await supabase.from('teams').select('id').eq('lobby_id', foundLobby.id).eq('name', tName).single();
-    const { data: p, error } = await supabase.from('players').insert({ team_id: tIdData!.id, name: playerName }).select().single();
+    const { data: p, error } = await supabase.from('players').insert({ team_id: tIdData!.id, name: nameToUse }).select().single();
     if (error) return alert("Error joining.");
     
     localStorage.setItem('iw_pid', p.id);
@@ -712,11 +839,18 @@ export function App() {
       })}</div>
   );
 
-  // --- VIEWS ---
+  // --- HARD GATE: Mandatory Auth ---
+  if (loading) return <div className="min-h-screen bg-[#050b14] flex items-center justify-center"><div className="relative"><div className="absolute inset-0 bg-blue-500 blur-xl opacity-20 animate-pulse"></div><Loader2 className="w-12 h-12 animate-spin text-blue-500 relative z-10"/></div></div>;
+  if (!user) return <LoginView />;
+
+
+  // --- LOGIN VIEW (Lobby) ---
   if (view === 'login') {
       if (isRestoring) return <div className="min-h-screen bg-[#050b14] flex items-center justify-center"><div className="relative"><div className="absolute inset-0 bg-blue-500 blur-xl opacity-20 animate-pulse"></div><Loader2 className="w-12 h-12 animate-spin text-blue-500 relative z-10"/></div></div>;
       
       return (
+        <>
+        <ProfileBadge onSettings={() => { setPreviousView(view); setView('settings'); }} />
         <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-[#050b14]">
           {/* Animated Background Elements */}
           <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -725,6 +859,16 @@ export function App() {
               <div className="absolute top-[20%] right-[20%] w-[20%] h-[20%] bg-yellow-500/5 rounded-full blur-[80px] animate-pulse-slow" style={{animationDelay: '2s'}}></div>
               <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150 mix-blend-overlay"></div>
           </div>
+          
+          {/* Referee Access (Moderator Only - No Lobby Code Required) */}
+          {profile?.role === 'moderator' && (
+            <button 
+              onClick={() => setView('referee')}
+              className="absolute bottom-6 right-6 z-50 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/30 px-4 py-2 rounded-lg text-xs font-black tracking-widest hover:scale-105 active:scale-95 transition-all flex items-center gap-2 shadow-[0_0_15px_rgba(239,68,68,0.2)]"
+            >
+              <Gavel size={14} /> REFEREE TOOLS
+            </button>
+          )}
           
           <div className="max-w-md w-full relative z-10 animate-slide-up group">
             <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 via-purple-600 to-yellow-600 rounded-[2rem] opacity-30 blur-lg group-hover:opacity-60 transition duration-1000"></div>
@@ -744,7 +888,7 @@ export function App() {
                 </h1>
                 <p className="text-blue-200/60 font-medium tracking-[0.4em] text-[10px] mb-12 uppercase border-y border-white/5 py-3">Tactical Economy Simulator</p>
                 
-                <form onSubmit={handleFindLobby} className="space-y-6 relative">
+                <form onSubmit={(e) => handleFindLobby(e, 'select-team')} className="space-y-6 relative">
                     <div className="relative group/input">
                         <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500 to-purple-500 rounded-xl opacity-0 group-hover/input:opacity-50 transition duration-500 blur"></div>
                         <div className="relative flex items-center bg-[#050b14] border border-white/10 rounded-xl overflow-hidden shadow-inner">
@@ -758,26 +902,82 @@ export function App() {
                             />
                         </div>
                     </div>
-                    <button className="w-full group/btn relative overflow-hidden bg-white text-black font-black py-5 rounded-xl hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 shadow-[0_0_30px_rgba(255,255,255,0.1)] hover:shadow-[0_0_50px_rgba(255,255,255,0.2)]">
-                        <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-purple-600 opacity-0 group-hover/btn:opacity-10 transition-opacity"></div>
-                        <span className="relative z-10 tracking-widest text-lg flex items-center justify-center gap-2">
-                             INITIALIZE DEPLOYMENT <ChevronRight className="w-5 h-5 group-hover/btn:translate-x-1 transition-transform"/>
-                        </span>
-                    </button>
+                    {/* Dual Action Buttons */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <button 
+                        type="submit" 
+                        disabled={deployLoading || !lobbyCode.trim()}
+                        className={`col-span-2 group/btn relative overflow-hidden font-black py-4 rounded-xl shadow-[0_0_20px_rgba(255,255,255,0.1)] transition-all duration-300 flex items-center justify-center ${deployLoading ? 'bg-gray-800 text-white/60 cursor-wait' : 'bg-white text-black hover:shadow-[0_0_40px_rgba(255,255,255,0.2)] hover:scale-[1.02] active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:shadow-none'}`}
+                      >
+                          <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-purple-600 opacity-0 group-hover/btn:opacity-10 transition-opacity"></div>
+                          <span className="relative z-10 tracking-widest text-xs flex items-center justify-center gap-2">
+                              {deployLoading ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> VERIFYING...</> : <><Zap size={14} /> DEPLOY</>}
+                          </span>
+                      </button>
+                      <button type="button" onClick={() => handleModeratorAccess()} disabled={modLoading || !lobbyCode.trim()} className={`group/btn relative overflow-hidden font-black py-4 rounded-xl border transition-all duration-300 shadow-[0_0_20px_rgba(239,68,68,0.1)] flex items-center justify-center ${modLoading ? 'bg-red-900/20 text-red-400 border-red-500/30 cursor-wait' : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20 hover:border-red-500/50 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100'}`}>
+                          <div className="absolute inset-0 bg-gradient-to-r from-red-600/0 via-red-600/10 to-red-600/0 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-700"></div>
+                          <span className="relative z-10 tracking-widest text-xs flex items-center justify-center gap-2">
+                              {modLoading ? <><div className="w-3 h-3 border-2 border-red-400 border-t-transparent rounded-full animate-spin" /> VERIFYING...</> : <><Crown size={14} /> OVERSEER</>}
+                          </span>
+                      </button>
+                      <button 
+                        type="button" 
+                        onClick={() => handleFindLobby('streamer')} 
+                        disabled={streamerLoading || !lobbyCode.trim()}
+                        className={`group/btn relative overflow-hidden font-black py-4 rounded-xl border transition-all duration-300 shadow-[0_0_20px_rgba(168,85,247,0.1)] flex items-center justify-center ${streamerLoading ? 'bg-purple-900/20 text-purple-400 border-purple-500/30 cursor-wait' : 'bg-purple-500/10 text-purple-400 border-purple-500/30 hover:bg-purple-500/20 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:bg-purple-500/10'}`}
+                      >
+                          <div className="absolute inset-0 bg-gradient-to-r from-purple-600/0 via-purple-600/10 to-purple-600/0 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-700"></div>
+                          <span className="relative z-10 tracking-widest text-xs flex items-center justify-center gap-2">
+                              {streamerLoading ? <><div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" /> VERIFYING...</> : <><MonitorPlay size={14} /> STREAMER</>}
+                          </span>
+                      </button>
+                    </div>
                 </form>
             </div>
             
-             <div className="mt-12 flex flex-col items-center gap-4 opacity-50 hover:opacity-100 transition-opacity duration-500">
-                  <div className="h-px w-24 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
-                  <div className="flex items-center gap-3">
-                      <img src="/Logo.png" alt="Logo" className="w-8 h-8 object-contain opacity-80" />
-                      <a href="https://t.me/CoCEliteNetwork" target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold tracking-[0.2em] uppercase text-slate-400 hover:text-blue-400 transition-colors cursor-pointer border-b border-transparent hover:border-blue-400">CLASH OF CLANS ELITE NETWORK</a>
+             <div className="mt-16 flex flex-col items-center gap-6 opacity-60 hover:opacity-100 transition-opacity duration-500 pb-8">
+                  <div className="h-px w-32 bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
+                  
+                  <div className="flex flex-col md:flex-row items-center gap-4 md:gap-6 p-4 rounded-2xl border border-white/5 bg-black/20 backdrop-blur-sm">
+                      <div className="flex items-center gap-4">
+                          <img src="/Logo.png" alt="Logo" className="w-12 h-12 object-contain drop-shadow-lg" />
+                          <span className="text-sm font-black tracking-[0.15em] uppercase text-slate-300 text-shadow">
+                              CLASH OF CLANS ELITE NETWORK
+                          </span>
+                      </div>
+                      
+                      <div className="hidden md:block w-px h-8 bg-white/10"></div>
+                      
+                      <a 
+                          href="https://t.me/CoCEliteNetwork" 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all hover:scale-105 active:scale-95 shadow-lg shadow-blue-500/20 hover:shadow-blue-500/40"
+                      >
+                          VISIT CHANNEL <ExternalLink size={12} />
+                      </a>
                   </div>
               </div>
           </div>
+          
+          {/* Disclaimer */}
+          <div className="absolute bottom-4 left-0 w-full text-center px-4 pointer-events-none">
+              <p className="text-[9px] text-slate-600 font-medium tracking-wide max-w-xl mx-auto leading-tight pointer-events-auto">
+                  This material is unofficial and is not endorsed by Supercell. For more information see Supercell's Fan Content Policy: <a href="https://www.supercell.com/fan-content-policy" target="_blank" rel="noopener noreferrer" className="hover:text-slate-400 underline transition-colors">www.supercell.com/fan-content-policy</a>.
+              </p>
+          </div>
         </div>
+      </>
       );
   }
+
+  // --- SETTINGS VIEW ---
+  if (view === 'settings') return (
+    <ProtectedRoute>
+      <ProfileBadge onSettings={() => { setPreviousView(view); setView('settings'); }} />
+      <UserSettings onBack={() => setView(previousView)} />
+    </ProtectedRoute>
+  );
   
   if (view === 'select-team') return (
       <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-[#050b14]">
@@ -796,13 +996,21 @@ export function App() {
                   
                   <div className="relative max-w-lg mx-auto group">
                       <div className="absolute -inset-1 bg-gradient-to-r from-yellow-500/0 via-yellow-500/50 to-yellow-500/0 rounded-lg opacity-0 group-focus-within:opacity-100 transition duration-500 blur-md"></div>
-                      <input 
-                        value={playerName} 
-                        onChange={e => setPlayerName(e.target.value)} 
-                        className="relative bg-[#0a101f] border border-white/10 text-2xl lg:text-4xl font-black text-center text-white focus:border-yellow-500/50 outline-none px-4 py-4 lg:px-8 lg:py-6 w-full placeholder:text-slate-800 transition-all rounded-2xl shadow-xl" 
-                        placeholder="ENTER CALLSIGN" 
-                        autoFocus
-                      />
+                      {profile && profile.username && !profile.username.startsWith('Recruit_') ? (
+                        <div className="relative bg-[#0a101f] border border-green-500/30 text-2xl lg:text-4xl font-black text-center text-white px-4 py-4 lg:px-8 lg:py-6 w-full rounded-2xl shadow-xl flex items-center justify-center gap-3">
+                          <div className="w-3 h-3 rounded-full bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.6)] shrink-0" />
+                          <span>{profile.username}</span>
+                          <span className="text-[10px] text-green-400/60 font-bold tracking-[0.2em] uppercase absolute bottom-2 right-4">Verified</span>
+                        </div>
+                      ) : (
+                        <input 
+                          value={playerName} 
+                          onChange={e => setPlayerName(e.target.value)} 
+                          className="relative bg-[#0a101f] border border-white/10 text-2xl lg:text-4xl font-black text-center text-white focus:border-yellow-500/50 outline-none px-4 py-4 lg:px-8 lg:py-6 w-full placeholder:text-slate-800 transition-all rounded-2xl shadow-xl" 
+                          placeholder="ENTER CALLSIGN" 
+                          autoFocus
+                        />
+                      )}
                   </div>
               </div>
               
@@ -933,6 +1141,7 @@ export function App() {
             </button>
         </div>
     </div>
+
   );
 
   if (view === 'streamer') { 
@@ -1034,6 +1243,7 @@ export function App() {
   }
 
   if (view === 'moderator') return (
+    <ProtectedRoute requiredRole="moderator">
     <div className="min-h-screen bg-[#050b14] text-white p-8 animate-fade-in relative overflow-x-hidden">
         <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150 mix-blend-overlay pointer-events-none"></div>
         <div className="max-w-[1920px] mx-auto relative z-10">
@@ -1202,6 +1412,7 @@ export function App() {
             </div>
         </div>
     </div>
+    </ProtectedRoute>
   );
 
   // --- GAME VIEW ---
@@ -1437,5 +1648,15 @@ export function App() {
             </div>
       </div>
     </div>
+  );
+}
+
+// --- AUTH WRAPPER ---
+export function App() {
+  return (
+    <AuthProvider>
+      <CallsignModal />
+      <AppContent />
+    </AuthProvider>
   );
 }
