@@ -718,7 +718,14 @@ function AppContent() {
   };
 
   const handleRenameTeam = async (tId: string) => { if(!tempTeamName.trim()) return; await supabase.rpc('moderator_rename_team', { p_team_id: tId, p_new_name: tempTeamName }); setEditingTeamId(null); fetchTeams(foundLobby.id); };
-  const handleNuke = async () => { if(confirm("DELETE LOBBY?")) await supabase.rpc('delete_lobby', { p_lobby_id: foundLobby.id }); };
+  const handleNuke = async () => { 
+    if(confirm("DELETE LOBBY? This action cannot be undone.")) {
+        await supabase.rpc('delete_lobby', { p_lobby_id: foundLobby.id });
+        setFoundLobby(null);
+        setLobbyCode('');
+        navigate('/');
+    }
+  };
   const handleSwitch = async (pId: string, currentTeamName: string) => { if (lobbyTeams.length < 2) return; const other = lobbyTeams.find(t => t.name !== currentTeamName); if(other && confirm(`Switch to ${other.name}?`)) { await supabase.from('players').update({ team_id: other.id }).eq('id', pId); fetchTeams(foundLobby.id); } };
   const handleKick = async (pId: string) => { if(confirm("Kick player?")) { await supabase.from('players').delete().eq('id', pId); fetchTeams(foundLobby.id); } };
   const handleReset = async (tId: string) => { 
