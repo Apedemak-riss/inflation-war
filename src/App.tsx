@@ -19,7 +19,6 @@ const CC_LIMITS = { troop: 55, siege: 2, spell: 4 };
 
 
 // --- TYPES ---
-type View = 'login' | 'auth' | 'select-team' | 'game' | 'moderator' | 'streamer' | 'referee' | 'settings';
 
 type ItemType = 'troop' | 'siege' | 'spell' | 'super_troop' | 'equipment' | 'pet';
 type HeroType = 'BK' | 'AQ' | 'GW' | 'RC' | 'MP' | null;
@@ -214,9 +213,9 @@ const NumberTicker = ({ value, duration = 500 }: { value: number, duration?: num
 
 
 // --- HELPER COMPONENT ---
-function LobbyCodeSync({ setLobbyCode, navigate }: { setLobbyCode: (c: string) => void, navigate: any }) {
+function LobbyCodeSync({ setLobbyCode }: { setLobbyCode: (c: string) => void }) {
   const { code } = useParams();
-  useEffect(() => { if (code) { setLobbyCode(code); navigate('/join'); } }, [code, setLobbyCode, navigate]);
+  useEffect(() => { if (code) setLobbyCode(code); }, [code, setLobbyCode]);
   return null;
 }
 
@@ -856,6 +855,89 @@ function AppContent() {
   if (!user) return <LoginView />;
 
 
+  // --- TEAM SELECTION VIEW ---
+  const teamSelectionView = (
+      <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-[#050b14]">
+          <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150 mix-blend-overlay pointer-events-none"></div>
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-purple-500 to-yellow-500"></div>
+          
+           <div className="max-w-5xl w-full space-y-6 lg:space-y-12 relative z-10 animate-fade-in">
+               <div className="text-center space-y-4 lg:space-y-6">
+                  <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-black tracking-[0.3em] uppercase shadow-[0_0_20px_rgba(59,130,246,0.2)]">
+                      <Wifi size={12} className="animate-pulse"/> Secure Link Established
+                  </div>
+                  <div>
+                    <h2 className="text-5xl lg:text-7xl font-black text-white tracking-tighter drop-shadow-2xl mb-2">{lobbyCode}</h2>
+                    <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">Mission Control Lobby</p>
+                  </div>
+                  
+                  <div className="relative max-w-lg mx-auto group">
+                      <div className="absolute -inset-1 bg-gradient-to-r from-yellow-500/0 via-yellow-500/50 to-yellow-500/0 rounded-lg opacity-0 group-focus-within:opacity-100 transition duration-500 blur-md"></div>
+                      {profile && profile.username && !profile.username.startsWith('Recruit_') ? (
+                        <div className="relative bg-[#0a101f] border border-green-500/30 text-2xl lg:text-4xl font-black text-center text-white px-4 py-4 lg:px-8 lg:py-6 w-full rounded-2xl shadow-xl flex items-center justify-center gap-3">
+                          <div className="w-3 h-3 rounded-full bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.6)] shrink-0" />
+                          <span>{profile.username}</span>
+                          <span className="text-[10px] text-green-400/60 font-bold tracking-[0.2em] uppercase absolute bottom-2 right-4">Verified</span>
+                        </div>
+                      ) : (
+                        <input 
+                          value={playerName} 
+                          onChange={e => setPlayerName(e.target.value)} 
+                          className="relative bg-[#0a101f] border border-white/10 text-2xl lg:text-4xl font-black text-center text-white focus:border-yellow-500/50 outline-none px-4 py-4 lg:px-8 lg:py-6 w-full placeholder:text-slate-800 transition-all rounded-2xl shadow-xl" 
+                          placeholder="ENTER CALLSIGN" 
+                          autoFocus
+                        />
+                      )}
+                  </div>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {lobbyTeams.map((team, idx) => (
+                      <div key={team.id} className="group relative" style={{animationDelay: `${idx * 100}ms`}}>
+                          <div className={`absolute -inset-0.5 bg-gradient-to-r ${idx === 0 ? 'from-blue-600 to-cyan-600' : 'from-purple-600 to-pink-600'} rounded-[2.5rem] opacity-20 group-hover:opacity-60 transition duration-500 blur`}></div>
+                          <div className="relative glass rounded-[2rem] p-8 flex flex-col h-full bg-[#0a101f]/90 border border-white/5 backdrop-blur-xl transition-transform duration-300 hover:scale-[1.01]">
+                              <div className="flex justify-between items-start mb-8">
+                                   <div className={`p-4 rounded-2xl ${idx === 0 ? 'bg-blue-500/10 text-blue-500' : 'bg-purple-500/10 text-purple-500'} border border-white/5`}>
+                                       <Users className="w-8 h-8" />
+                                   </div>
+                                   <div className="text-right">
+                                       <h3 className="text-3xl font-black tracking-tight text-white mb-1">{team.name}</h3>
+                                       <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Squadron {idx + 1}</div>
+                                   </div>
+                              </div>
+                              
+                              <div className="flex-1 w-full space-y-3 mb-8">
+                                  {[0, 1, 2].map(i => (
+                                      <div key={i} className={`rounded-xl p-4 text-sm font-bold flex items-center gap-4 border transition-all ${team.players?.[i] ? 'bg-white/5 border-white/10 text-white shadow-lg' : 'bg-black/20 border-white/5 text-slate-700 dashed-border'}`}>
+                                          <div className={`w-3 h-3 rounded-full shadow-[0_0_10px_currentColor] ${team.players?.[i] ? 'bg-green-500 text-green-500' : 'bg-slate-800 text-slate-800'}`} />
+                                          {team.players?.[i] ? (
+                                              <span className="text-base tracking-wide">{team.players[i].name}</span>
+                                          ) : (
+                                              <span className="opacity-40 uppercase tracking-wider text-[10px]">Open Slot</span>
+                                          )}
+                                      </div>
+                                  ))}
+                              </div>
+                              
+                              <button 
+                                onClick={() => handleJoinTeam(team.name)} 
+                                disabled={team.players?.length >= 3} 
+                                className={`w-full py-5 rounded-xl font-black uppercase tracking-widest transition-all duration-300 shadow-xl flex items-center justify-center gap-2 ${team.players?.length >= 3 ? 'bg-slate-800 text-slate-600 cursor-not-allowed border border-white/5' : 'bg-white text-black hover:bg-blue-50 hover:scale-[1.02] hover:shadow-white/20'}`}
+                              >
+                                  {team.players?.length >= 3 ? <Lock size={16}/> : <Zap size={18} className={idx===0?'text-blue-600':'text-purple-600'} />}
+                                  {team.players?.length >= 3 ? 'UNIT FULL' : 'INITIATE LINK'}
+                              </button>
+                          </div>
+                      </div>
+                  ))}
+              </div>
+              <button onClick={() => navigate('/')} className="block mx-auto text-slate-600 hover:text-red-400 text-xs tracking-[0.2em] font-bold uppercase transition-colors py-4 flex items-center gap-2">
+                 <LogOut size={14}/> Abort Connection
+              </button>
+          </div>
+      </div>
+  );
+
   // --- ROUTER & VIEWS ---
   return (
     <Routes>
@@ -894,7 +976,7 @@ function AppContent() {
                 </h1>
                 <p className="text-blue-200/60 font-medium tracking-[0.4em] text-[10px] mb-12 uppercase border-y border-white/5 py-3">Tactical Economy Simulator</p>
                 
-                <form onSubmit={(e) => handleFindLobby(e, 'select-team')} className="space-y-6 relative">
+                <form onSubmit={(e) => handleFindLobby(e, '/join/' + lobbyCode)} className="space-y-6 relative">
                     <div className="relative group/input">
                         <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500 to-purple-500 rounded-xl opacity-0 group-hover/input:opacity-50 transition duration-500 blur"></div>
                         <div className="relative flex items-center bg-[#050b14] border border-white/10 rounded-xl overflow-hidden shadow-inner">
@@ -996,88 +1078,8 @@ function AppContent() {
         </ProtectedRoute>
       } />
       
-      <Route path="/join/:code" element={<LobbyCodeSync setLobbyCode={setLobbyCode} navigate={navigate} />} />
-      <Route path="/join" element={
-      <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-[#050b14]">
-          <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150 mix-blend-overlay pointer-events-none"></div>
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-purple-500 to-yellow-500"></div>
-          
-           <div className="max-w-5xl w-full space-y-6 lg:space-y-12 relative z-10 animate-fade-in">
-               <div className="text-center space-y-4 lg:space-y-6">
-                  <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-black tracking-[0.3em] uppercase shadow-[0_0_20px_rgba(59,130,246,0.2)]">
-                      <Wifi size={12} className="animate-pulse"/> Secure Link Established
-                  </div>
-                  <div>
-                    <h2 className="text-5xl lg:text-7xl font-black text-white tracking-tighter drop-shadow-2xl mb-2">{lobbyCode}</h2>
-                    <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">Mission Control Lobby</p>
-                  </div>
-                  
-                  <div className="relative max-w-lg mx-auto group">
-                      <div className="absolute -inset-1 bg-gradient-to-r from-yellow-500/0 via-yellow-500/50 to-yellow-500/0 rounded-lg opacity-0 group-focus-within:opacity-100 transition duration-500 blur-md"></div>
-                      {profile && profile.username && !profile.username.startsWith('Recruit_') ? (
-                        <div className="relative bg-[#0a101f] border border-green-500/30 text-2xl lg:text-4xl font-black text-center text-white px-4 py-4 lg:px-8 lg:py-6 w-full rounded-2xl shadow-xl flex items-center justify-center gap-3">
-                          <div className="w-3 h-3 rounded-full bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.6)] shrink-0" />
-                          <span>{profile.username}</span>
-                          <span className="text-[10px] text-green-400/60 font-bold tracking-[0.2em] uppercase absolute bottom-2 right-4">Verified</span>
-                        </div>
-                      ) : (
-                        <input 
-                          value={playerName} 
-                          onChange={e => setPlayerName(e.target.value)} 
-                          className="relative bg-[#0a101f] border border-white/10 text-2xl lg:text-4xl font-black text-center text-white focus:border-yellow-500/50 outline-none px-4 py-4 lg:px-8 lg:py-6 w-full placeholder:text-slate-800 transition-all rounded-2xl shadow-xl" 
-                          placeholder="ENTER CALLSIGN" 
-                          autoFocus
-                        />
-                      )}
-                  </div>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {lobbyTeams.map((team, idx) => (
-                      <div key={team.id} className="group relative" style={{animationDelay: `${idx * 100}ms`}}>
-                          <div className={`absolute -inset-0.5 bg-gradient-to-r ${idx === 0 ? 'from-blue-600 to-cyan-600' : 'from-purple-600 to-pink-600'} rounded-[2.5rem] opacity-20 group-hover:opacity-60 transition duration-500 blur`}></div>
-                          <div className="relative glass rounded-[2rem] p-8 flex flex-col h-full bg-[#0a101f]/90 border border-white/5 backdrop-blur-xl transition-transform duration-300 hover:scale-[1.01]">
-                              <div className="flex justify-between items-start mb-8">
-                                   <div className={`p-4 rounded-2xl ${idx === 0 ? 'bg-blue-500/10 text-blue-500' : 'bg-purple-500/10 text-purple-500'} border border-white/5`}>
-                                       <Users className="w-8 h-8" />
-                                   </div>
-                                   <div className="text-right">
-                                       <h3 className="text-3xl font-black tracking-tight text-white mb-1">{team.name}</h3>
-                                       <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Squadron {idx + 1}</div>
-                                   </div>
-                              </div>
-                              
-                              <div className="flex-1 w-full space-y-3 mb-8">
-                                  {[0, 1, 2].map(i => (
-                                      <div key={i} className={`rounded-xl p-4 text-sm font-bold flex items-center gap-4 border transition-all ${team.players?.[i] ? 'bg-white/5 border-white/10 text-white shadow-lg' : 'bg-black/20 border-white/5 text-slate-700 dashed-border'}`}>
-                                          <div className={`w-3 h-3 rounded-full shadow-[0_0_10px_currentColor] ${team.players?.[i] ? 'bg-green-500 text-green-500' : 'bg-slate-800 text-slate-800'}`} />
-                                          {team.players?.[i] ? (
-                                              <span className="text-base tracking-wide">{team.players[i].name}</span>
-                                          ) : (
-                                              <span className="opacity-40 uppercase tracking-wider text-[10px]">Open Slot</span>
-                                          )}
-                                      </div>
-                                  ))}
-                              </div>
-                              
-                              <button 
-                                onClick={() => handleJoinTeam(team.name)} 
-                                disabled={team.players?.length >= 3} 
-                                className={`w-full py-5 rounded-xl font-black uppercase tracking-widest transition-all duration-300 shadow-xl flex items-center justify-center gap-2 ${team.players?.length >= 3 ? 'bg-slate-800 text-slate-600 cursor-not-allowed border border-white/5' : 'bg-white text-black hover:bg-blue-50 hover:scale-[1.02] hover:shadow-white/20'}`}
-                              >
-                                  {team.players?.length >= 3 ? <Lock size={16}/> : <Zap size={18} className={idx===0?'text-blue-600':'text-purple-600'} />}
-                                  {team.players?.length >= 3 ? 'UNIT FULL' : 'INITIATE LINK'}
-                              </button>
-                          </div>
-                      </div>
-                  ))}
-              </div>
-              <button onClick={() => navigate('/')} className="block mx-auto text-slate-600 hover:text-red-400 text-xs tracking-[0.2em] font-bold uppercase transition-colors py-4 flex items-center gap-2">
-                 <LogOut size={14}/> Abort Connection
-              </button>
-          </div>
-      </div>
-  } />
+      <Route path="/join/:code" element={<><LobbyCodeSync setLobbyCode={setLobbyCode} />{teamSelectionView}</>} />
+      <Route path="/join" element={teamSelectionView} />
 
   <Route path="/referee" element={
     <div className="min-h-screen bg-[#050b14] text-white p-4 md:p-8 flex items-center justify-center animate-fade-in relative overflow-hidden">
