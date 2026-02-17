@@ -26,6 +26,12 @@ export function UserSettings({ onBack }: { onBack: () => void }) {
   const [passwordStatus, setPasswordStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [passwordError, setPasswordError] = useState('');
 
+  // --- Deletion ---
+  const [showDanger, setShowDanger] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState('');
+  const [deleteStatus, setDeleteStatus] = useState<'idle' | 'deleting' | 'error'>('idle');
+  const [deleteError, setDeleteError] = useState('');
+
   // Preview avatar updates live as callsign changes
   const avatarSeed = callsign.trim() || profile?.username || 'unknown';
 
@@ -119,6 +125,28 @@ export function UserSettings({ onBack }: { onBack: () => void }) {
       setConfirmPassword('');
       setPasswordStatus('success');
       setTimeout(() => setPasswordStatus('idle'), 3000);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirm !== 'CONFIRM') return;
+    
+    setDeleteStatus('deleting');
+    setDeleteError('');
+
+    try {
+      const { error } = await supabase.rpc('delete_own_account');
+      
+      if (error) throw error;
+      
+      // Force sign out immediately
+      await supabase.auth.signOut();
+      window.location.href = '/'; // Hard reload to clear all state
+      
+    } catch (err: any) {
+      console.error('Deletion failed:', err);
+      setDeleteError(err.message || 'Failed to delete account.');
+      setDeleteStatus('error');
     }
   };
 
@@ -352,6 +380,89 @@ export function UserSettings({ onBack }: { onBack: () => void }) {
               <><Lock size={12} /> Update Password</>
             )}
           </button>
+        </div>
+
+        {/* ─── DANGER ZONE ─── */}
+        <div className={`transition-all duration-500 rounded-2xl border bg-black/40 backdrop-blur-xl p-6 shadow-[0_0_30px_rgba(0,0,0,0.3)] space-y-4 overflow-hidden
+          ${showDanger ? 'border-red-500/30 bg-red-900/5' : 'border-white/5 opacity-80 hover:opacity-100 hover:border-red-500/20'}
+        `}>
+          {!showDanger ? (
+            <button 
+              onClick={() => setShowDanger(true)}
+              className="w-full flex items-center justify-between group"
+            >
+              <div className="text-left">
+                <div className="flex items-center gap-2 mb-1">
+                  <AlertTriangle size={14} className="text-red-500" />
+                  <span className="text-xs font-black uppercase tracking-widest text-red-500">Danger Zone</span>
+                </div>
+                <p className="text-[10px] text-slate-500 uppercase tracking-wider">Irreversible account actions</p>
+              </div>
+              <span className="text-[10px] bg-red-500/10 text-red-500 px-3 py-1.5 rounded-lg border border-red-500/20 font-bold uppercase tracking-widest group-hover:bg-red-500/20 transition-colors">
+                Open
+              </span>
+            </button>
+          ) : (
+            <div className="animate-fade-in space-y-6">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="text-red-500 font-black uppercase tracking-widest text-sm mb-1">Delete Account</h3>
+                  <p className="text-slate-400 text-xs leading-relaxed max-w-[280px]">
+                    Permanently wipe your profile, callsign, and all game progress. 
+                    <span className="block mt-1 text-red-400 font-bold">This action cannot be undone.</span>
+                  </p>
+                </div>
+                <button 
+                  onClick={() => setShowDanger(false)}
+                  className="text-[10px] text-slate-600 hover:text-white uppercase tracking-widest font-bold"
+                >
+                  Cancel
+                </button>
+              </div>
+
+              <div className="space-y-4 pt-2 border-t border-red-500/10">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    Type <span className="text-white bg-white/10 px-1 rounded">CONFIRM</span> to proceed
+                  </label>
+                  <input
+                    type="text"
+                    value={deleteConfirm}
+                    onChange={e => setDeleteConfirm(e.target.value)}
+                    className="w-full bg-red-900/10 border border-red-500/20 rounded-xl p-4 text-sm font-bold text-red-500 placeholder:text-red-500/20 outline-none focus:border-red-500/50 transition-colors text-center tracking-widest uppercase"
+                    placeholder="CONFIRM"
+                    maxLength={7}
+                    onPaste={e => e.preventDefault()}
+                  />
+                </div>
+
+                {deleteStatus === 'error' && (
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 flex items-center gap-3 animate-fade-in">
+                    <AlertTriangle size={14} className="text-red-400 shrink-0" />
+                    <p className="text-red-400 text-[10px] font-bold uppercase tracking-wider">{deleteError}</p>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleDeleteAccount}
+                  disabled={deleteStatus === 'deleting' || deleteConfirm !== 'CONFIRM'}
+                  className={`w-full font-black py-4 rounded-xl transition-all duration-300 uppercase tracking-widest text-[11px] flex items-center justify-center gap-2
+                    ${deleteConfirm === 'CONFIRM'
+                      ? 'bg-red-500 text-white hover:bg-red-600 shadow-[0_0_20px_rgba(239,68,68,0.4)] hover:shadow-[0_0_30px_rgba(239,68,68,0.6)]' 
+                      : 'bg-white/5 text-slate-500 border border-white/5 cursor-not-allowed opacity-50'
+                    }
+                    ${deleteStatus === 'deleting' && 'cursor-wait opacity-80'}
+                  `}
+                >
+                  {deleteStatus === 'deleting' ? (
+                    <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> DELETING ACCOUNT...</>
+                  ) : (
+                    <><AlertTriangle size={14} /> DELETE MY ACCOUNT</>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Bottom spacer */}
