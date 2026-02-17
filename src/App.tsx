@@ -470,6 +470,16 @@ function AppContent() {
                 setTeamId(newTid); setTeamName(t?.name || ''); setMyPurchases([]); setTeamPurchases([]);
             }
         })
+        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'teams', filter: `id=eq.${teamId}` }, () => {
+            alert("Team disbanded by moderator.");
+            localStorage.removeItem('iw_pid'); localStorage.removeItem('iw_tid'); localStorage.removeItem('iw_lobby');
+            setPlayerId(null); setTeamId(null); setFoundLobby(null); setLobbyCode(''); navigate('/');
+        })
+        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'players', filter: `id=eq.${playerId}` }, () => {
+            alert("You have been removed from the match.");
+            localStorage.removeItem('iw_pid'); localStorage.removeItem('iw_tid'); localStorage.removeItem('iw_lobby');
+            setPlayerId(null); setTeamId(null); setFoundLobby(null); setLobbyCode(''); navigate('/');
+        })
         .subscribe();
       return () => { supabase.removeChannel(ch); };
     }
