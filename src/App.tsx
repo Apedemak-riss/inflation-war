@@ -851,7 +851,7 @@ function AppContent() {
       return (
         <>
         <ProfileBadge onSettings={() => { setPreviousView(view); setView('settings'); }} />
-        <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-[#050b14]">
+        <div className="min-h-screen flex items-center justify-center p-4 pt-24 md:p-4 relative overflow-x-hidden bg-[#050b14]">
           {/* Animated Background Elements */}
           <div className="absolute inset-0 overflow-hidden pointer-events-none">
               <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-600/10 rounded-full blur-[100px] animate-pulse-slow"></div>
@@ -860,15 +860,7 @@ function AppContent() {
               <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150 mix-blend-overlay"></div>
           </div>
           
-          {/* Referee Access (Moderator Only - No Lobby Code Required) */}
-          {profile?.role === 'moderator' && (
-            <button 
-              onClick={() => setView('referee')}
-              className="absolute bottom-6 right-6 z-50 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/30 px-4 py-2 rounded-lg text-xs font-black tracking-widest hover:scale-105 active:scale-95 transition-all flex items-center gap-2 shadow-[0_0_15px_rgba(239,68,68,0.2)]"
-            >
-              <Gavel size={14} /> REFEREE TOOLS
-            </button>
-          )}
+
           
           <div className="max-w-md w-full relative z-10 animate-slide-up group">
             <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 via-purple-600 to-yellow-600 rounded-[2rem] opacity-30 blur-lg group-hover:opacity-60 transition duration-1000"></div>
@@ -934,6 +926,18 @@ function AppContent() {
                     </div>
                 </form>
             </div>
+            
+            {/* Referee Access (Moderator Only) */}
+            {profile?.role === 'moderator' && (
+                <div className="mt-8 flex justify-center animate-fade-in relative z-20">
+                    <button 
+                      onClick={() => setView('referee')}
+                      className="bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/30 px-6 py-3 rounded-xl text-xs font-black tracking-widest hover:scale-105 active:scale-95 transition-all flex items-center gap-2 shadow-[0_0_15px_rgba(239,68,68,0.2)]"
+                    >
+                      <Gavel size={14} /> REFEREE TOOLS
+                    </button>
+                </div>
+            )}
             
              <div className="mt-16 flex flex-col items-center gap-6 opacity-60 hover:opacity-100 transition-opacity duration-500 pb-8">
                   <div className="h-px w-32 bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>

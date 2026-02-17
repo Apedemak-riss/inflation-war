@@ -153,7 +153,7 @@ export function UserSettings({ onBack }: { onBack: () => void }) {
   const inputClasses = "w-full bg-[#050b14] border border-white/10 rounded-xl p-4 text-sm font-bold text-white placeholder:text-slate-700 outline-none transition-colors focus:border-blue-500/40";
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-[#050b14]">
+    <div className="min-h-screen flex items-center justify-center p-4 pt-24 md:p-4 relative overflow-x-hidden bg-[#050b14]">
       {/* Background */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-600/10 rounded-full blur-[100px] animate-pulse-slow" />

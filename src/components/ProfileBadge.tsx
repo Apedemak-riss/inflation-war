@@ -16,8 +16,8 @@ export function ProfileBadge({ onSettings }: { onSettings?: () => void }) {
   const avatarSeed = profile.username || user.email || 'unknown';
 
   return (
-    <div className="fixed top-6 right-6 z-50 animate-fade-in">
-      <div className="glass flex items-center gap-4 px-6 py-3.5 rounded-2xl border border-white/10 bg-black/60 backdrop-blur-xl shadow-[0_0_30px_rgba(0,0,0,0.4)]">
+    <div className="relative w-full z-50 md:fixed md:top-6 md:right-6 md:w-auto animate-fade-in mb-4 md:mb-0">
+      <div className="glass flex items-center justify-between md:justify-start gap-4 px-6 py-3.5 rounded-2xl border border-white/10 bg-black/60 backdrop-blur-xl shadow-[0_0_30px_rgba(0,0,0,0.4)] mx-4 mt-4 md:mx-0 md:mt-0">
 
         {/* Avatar */}
         <div className="relative">
