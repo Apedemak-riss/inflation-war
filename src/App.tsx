@@ -488,6 +488,12 @@ function AppContent() {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, () => fetchTeams(foundLobby.id))
         .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => fetchTeams(foundLobby.id))
         .on('postgres_changes', { event: '*', schema: 'public', table: 'purchases' }, () => fetchTeams(foundLobby.id))
+        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'lobbies', filter: `id=eq.${foundLobby.id}` }, () => {
+             alert("Lobby has been deleted.");
+             setFoundLobby(null);
+             setLobbyCode('');
+             navigate('/');
+        })
         .subscribe();
       return () => { supabase.removeChannel(ch); };
     }
