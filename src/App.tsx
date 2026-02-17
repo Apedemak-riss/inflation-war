@@ -742,7 +742,15 @@ function AppContent() {
         navigate('/');
     }
   };
-  const handleSwitch = async (pId: string, currentTeamName: string) => { if (lobbyTeams.length < 2) return; const other = lobbyTeams.find(t => t.name !== currentTeamName); if(other && confirm(`Switch to ${other.name}?`)) { await supabase.from('players').update({ team_id: other.id }).eq('id', pId); fetchTeams(foundLobby.id); } };
+  const handleSwitch = async (pId: string, currentTeamName: string) => { 
+    if (lobbyTeams.length < 2) return; 
+    const other = lobbyTeams.find(t => t.name !== currentTeamName); 
+    if(other && confirm(`Switch to ${other.name}? This will refund the current team's budget and clear the player's army.`)) { 
+        await supabase.rpc('clear_player_army', { p_player_id: pId });
+        await supabase.from('players').update({ team_id: other.id }).eq('id', pId); 
+        fetchTeams(foundLobby.id); 
+    } 
+  };
   const handleKick = async (pId: string) => { if(confirm("Kick player?")) { await supabase.from('players').delete().eq('id', pId); fetchTeams(foundLobby.id); } };
   const handleReset = async (tId: string) => { 
       if(confirm("Initiate Protocol: Purge & Reset? This will delete all team purchases and restore the budget to 100g.")) { 
