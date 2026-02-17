@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { ArrowLeft, Save, AlertTriangle, Check, Mail, Lock, Crosshair, Eye, EyeOff } from 'lucide-react';
 
@@ -6,8 +7,9 @@ function getAvatarUrl(seed: string) {
   return `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(seed)}`;
 }
 
-export function UserSettings({ onBack }: { onBack: () => void }) {
+export function UserSettings() {
   const { user, profile, supabase, refreshProfile } = useAuth();
+  const navigate = useNavigate();
 
   // --- Callsign ---
   const [callsign, setCallsign] = useState(profile?.username || '');
@@ -168,11 +170,11 @@ export function UserSettings({ onBack }: { onBack: () => void }) {
         {/* Header */}
         <div className="flex items-center gap-4">
           <button
-            onClick={onBack}
+            onClick={() => navigate(-1)}
             className="group flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-white/10 hover:border-white/20 transition-all active:scale-95"
           >
             <ArrowLeft size={16} className="group-hover:-translate-x-0.5 transition-transform" />
-            <span className="text-[10px] font-black uppercase tracking-widest">Back</span>
+            <span className="text-10px] font-black uppercase tracking-widest">Back</span>
           </button>
           <div>
             <h1 className="text-2xl font-black tracking-tighter text-white">

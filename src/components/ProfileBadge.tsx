@@ -1,12 +1,14 @@
 import { useAuth } from '../contexts/AuthContext';
 import { LogOut, Settings } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 function getAvatarUrl(seed: string) {
   return `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(seed)}`;
 }
 
-export function ProfileBadge({ onSettings }: { onSettings?: () => void }) {
+export function ProfileBadge() {
   const { user, profile, signOut } = useAuth();
+  const navigate = useNavigate();
 
   // Only render for authenticated users with a loaded profile
   if (!user || !profile) return null;
@@ -52,18 +54,16 @@ export function ProfileBadge({ onSettings }: { onSettings?: () => void }) {
         {/* Actions */}
         <div className="ml-2 h-8 w-px bg-white/10" />
 
-        {onSettings && (
-          <button
-            onClick={onSettings}
-            className="group flex items-center gap-2 px-3 py-2 rounded-lg text-slate-500 hover:text-blue-400 hover:bg-blue-500/10 transition-all"
-            title="Settings"
-          >
-            <Settings size={16} className="group-hover:rotate-90 transition-transform duration-300" />
-            <span className="text-[10px] font-bold uppercase tracking-widest hidden sm:inline group-hover:text-blue-400">
-              CFG
-            </span>
-          </button>
-        )}
+        <button
+          onClick={() => navigate('/settings')}
+          className="group flex items-center gap-2 px-3 py-2 rounded-lg text-slate-500 hover:text-blue-400 hover:bg-blue-500/10 transition-all"
+          title="Settings"
+        >
+          <Settings size={16} className="group-hover:rotate-90 transition-transform duration-300" />
+          <span className="text-[10px] font-bold uppercase tracking-widest hidden sm:inline group-hover:text-blue-400">
+            CFG
+          </span>
+        </button>
 
         <button
           onClick={signOut}

@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { Routes, Route, Navigate, useNavigate, useLocation, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { LoginView } from './components/LoginView';
@@ -19,6 +20,7 @@ const CC_LIMITS = { troop: 55, siege: 2, spell: 4 };
 
 // --- TYPES ---
 type View = 'login' | 'auth' | 'select-team' | 'game' | 'moderator' | 'streamer' | 'referee' | 'settings';
+
 type ItemType = 'troop' | 'siege' | 'spell' | 'super_troop' | 'equipment' | 'pet';
 type HeroType = 'BK' | 'AQ' | 'GW' | 'RC' | 'MP' | null;
 
@@ -211,11 +213,20 @@ const NumberTicker = ({ value, duration = 500 }: { value: number, duration?: num
 
 
 
+// --- HELPER COMPONENT ---
+function LobbyCodeSync({ setLobbyCode, navigate }: { setLobbyCode: (c: string) => void, navigate: any }) {
+  const { code } = useParams();
+  useEffect(() => { if (code) { setLobbyCode(code); navigate('/join'); } }, [code, setLobbyCode, navigate]);
+  return null;
+}
+
 // --- COMPONENT ---
 function AppContent() {
   const { user, profile, loading, supabase } = useAuth();
-  const [view, setView] = useState<View>('login');
-  const [previousView, setPreviousView] = useState<View>('login');
+  const navigate = useNavigate();
+  const location = useLocation();
+  // const [view, setView] = useState<View>('login'); // Replaced by Router
+  // const [previousView, setPreviousView] = useState<View>('login'); // Handled by history
   const [lobbyCode, setLobbyCode] = useState('');
   const [playerName, setPlayerName] = useState('');
   
@@ -281,7 +292,7 @@ function AppContent() {
           if (player && player.team_id === storedTid) {
               setPlayerId(player.id); setTeamId(player.team_id); setPlayerName(player.name); setLobbyCode(storedLobby);
               const { data: lobby } = await supabase.from('lobbies').select('*').eq('code', storedLobby).single();
-              if (lobby) { setFoundLobby(lobby); const { data: team } = await supabase.from('teams').select('name').eq('id', storedTid).single(); setTeamName(team?.name || ''); setView('game'); }
+              if (lobby) { setFoundLobby(lobby); const { data: team } = await supabase.from('teams').select('name').eq('id', storedTid).single(); setTeamName(team?.name || ''); navigate('/game'); }
           }
       }
       setIsRestoring(false);
@@ -292,8 +303,8 @@ function AppContent() {
     if (teams) setLobbyTeams(teams);
   };
 
-  const handleFindLobby = async (e?: React.FormEvent | View, modeArg?: View, retryCount = 0) => {
-    let mode: View = modeArg || 'select-team';
+  const handleFindLobby = async (e?: React.FormEvent | string, modeArg?: string, retryCount = 0) => {
+    let mode: string = modeArg || '/join';
     if (e && typeof e === 'object' && 'preventDefault' in e) {
         e.preventDefault();
     } else if (typeof e === 'string') {
@@ -302,7 +313,7 @@ function AppContent() {
 
     let code = lobbyCode.trim().toUpperCase();
     if (code.toLowerCase().startsWith(STREAMER_PREFIX.toLowerCase())) {
-      mode = 'streamer'; code = code.substring(STREAMER_PREFIX.length).toUpperCase();
+      mode = '/streamer'; code = code.substring(STREAMER_PREFIX.length).toUpperCase();
     }
     setLobbyCode(code);
 
@@ -320,11 +331,11 @@ function AppContent() {
 
     try {
       let { data: lobby } = await withTimeout<any>(supabase.from('lobbies').select('*').eq('code', code).single());
-      if (mode === 'moderator' && !lobby) {
+      if (mode === '/moderator' && !lobby) {
          const { data: nl } = await withTimeout<any>(supabase.from('lobbies').insert({ code }).select().single());
          lobby = nl; await withTimeout(supabase.from('teams').insert([{ lobby_id: nl.id, name: 'Team 1', budget: 100 }, { lobby_id: nl.id, name: 'Team 2', budget: 100 }]));
       } else if (!lobby) { setLoading(false); return alert("Not found"); }
-      setFoundLobby(lobby); fetchTeams(lobby.id); setView(mode);
+      setFoundLobby(lobby); fetchTeams(lobby.id); navigate(mode);
     } catch (err: any) {
       console.error('[FindLobby] Error:', err);
       const isAbort = (err instanceof DOMException && err.name === 'AbortError') ||
@@ -399,7 +410,7 @@ function AppContent() {
       console.log('[ModAccess] Success. Found lobby:', lobby);
       setFoundLobby(lobby);
       fetchTeams(lobby.id); // Fire and forget updater
-      setView('moderator');
+      navigate('/moderator');
       
     } catch (err: any) {
       console.error('[ModAccess] Error:', err);
@@ -440,12 +451,13 @@ function AppContent() {
     localStorage.setItem('iw_tid', tIdData!.id);
     localStorage.setItem('iw_lobby', lobbyCode);
 
-    setPlayerId(p.id); setTeamId(tIdData!.id); setTeamName(tName); setView('game');
+    localStorage.setItem('iw_lobby', lobbyCode);
+    setPlayerId(p.id); setTeamId(tIdData!.id); setTeamName(tName); navigate('/game');
   };
 
   // --- REALTIME ---
   useEffect(() => {
-    if (view === 'game' && teamId) {
+    if (location.pathname === '/game' && teamId) {
       fetchGameState();
       const ch = supabase.channel('game')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'teams', filter: `id=eq.${teamId}` }, p => { if(p.new && (p.new as any).budget !== undefined) setTeamBudget((p.new as any).budget); })
@@ -462,7 +474,7 @@ function AppContent() {
         .subscribe();
       return () => { supabase.removeChannel(ch); };
     }
-    if (foundLobby && (view === 'moderator' || view === 'streamer')) {
+    if (foundLobby && (location.pathname === '/moderator' || location.pathname === '/streamer')) {
       const ch = supabase.channel('admin')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, () => fetchTeams(foundLobby.id))
         .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => fetchTeams(foundLobby.id))
@@ -470,7 +482,7 @@ function AppContent() {
         .subscribe();
       return () => { supabase.removeChannel(ch); };
     }
-  }, [view, teamId, foundLobby, playerId]);
+  }, [location.pathname, teamId, foundLobby, playerId]);
 
   const fetchGameState = async () => {
     const { data: t } = await supabase.from('teams').select('budget').eq('id', teamId!).single();
@@ -519,7 +531,7 @@ function AppContent() {
   };
 
   const handleSell = async (item: Item) => { await supabase.rpc('sell_item', { p_player_id: playerId, p_item_id: item.id }); fetchGameState(); };
-  const handleLeave = async () => { if(confirm("Leave?")) { localStorage.clear(); setView('login'); if(playerId) await supabase.rpc('leave_team', { p_player_id: playerId }); }};
+  const handleLeave = async () => { if(confirm("Leave?")) { localStorage.clear(); navigate('/'); if(playerId) await supabase.rpc('leave_team', { p_player_id: playerId }); }};
 
   const handleClearArmy = async () => {
       if (myPurchases.length === 0) return;
@@ -844,13 +856,15 @@ function AppContent() {
   if (!user) return <LoginView />;
 
 
-  // --- LOGIN VIEW (Lobby) ---
-  if (view === 'login') {
-      if (isRestoring) return <div className="min-h-screen bg-[#050b14] flex items-center justify-center"><div className="relative"><div className="absolute inset-0 bg-blue-500 blur-xl opacity-20 animate-pulse"></div><Loader2 className="w-12 h-12 animate-spin text-blue-500 relative z-10"/></div></div>;
-      
-      return (
-        <>
-        <ProfileBadge onSettings={() => { setPreviousView(view); setView('settings'); }} />
+  // --- ROUTER & VIEWS ---
+  return (
+    <Routes>
+      <Route path="/" element={
+        isRestoring ? (
+           <div className="min-h-screen bg-[#050b14] flex items-center justify-center"><div className="relative"><div className="absolute inset-0 bg-blue-500 blur-xl opacity-20 animate-pulse"></div><Loader2 className="w-12 h-12 animate-spin text-blue-500 relative z-10"/></div></div>
+        ) : (
+          <>
+        <ProfileBadge />
         <div className="min-h-screen flex items-center justify-center p-4 pt-24 md:p-4 relative overflow-x-hidden bg-[#050b14]">
           {/* Animated Background Elements */}
           <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -931,7 +945,7 @@ function AppContent() {
             {profile?.role === 'moderator' && (
                 <div className="mt-8 flex justify-center animate-fade-in relative z-20">
                     <button 
-                      onClick={() => setView('referee')}
+                      onClick={() => navigate('/referee')}
                       className="bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/30 px-6 py-3 rounded-xl text-xs font-black tracking-widest hover:scale-105 active:scale-95 transition-all flex items-center gap-2 shadow-[0_0_15px_rgba(239,68,68,0.2)]"
                     >
                       <Gavel size={14} /> REFEREE TOOLS
@@ -972,18 +986,18 @@ function AppContent() {
           </div>
         </div>
       </>
-      );
-  }
+        )
+      } />
 
-  // --- SETTINGS VIEW ---
-  if (view === 'settings') return (
-    <ProtectedRoute>
-      <ProfileBadge onSettings={() => { setPreviousView(view); setView('settings'); }} />
-      <UserSettings onBack={() => setView(previousView)} />
-    </ProtectedRoute>
-  );
-  
-  if (view === 'select-team') return (
+      <Route path="/settings" element={
+        <ProtectedRoute>
+          <ProfileBadge />
+          <UserSettings />
+        </ProtectedRoute>
+      } />
+      
+      <Route path="/join/:code" element={<LobbyCodeSync setLobbyCode={setLobbyCode} navigate={navigate} />} />
+      <Route path="/join" element={
       <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-[#050b14]">
           <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150 mix-blend-overlay pointer-events-none"></div>
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-purple-500 to-yellow-500"></div>
@@ -1058,14 +1072,14 @@ function AppContent() {
                       </div>
                   ))}
               </div>
-              <button onClick={() => setView('login')} className="block mx-auto text-slate-600 hover:text-red-400 text-xs tracking-[0.2em] font-bold uppercase transition-colors py-4 flex items-center gap-2">
+              <button onClick={() => navigate('/')} className="block mx-auto text-slate-600 hover:text-red-400 text-xs tracking-[0.2em] font-bold uppercase transition-colors py-4 flex items-center gap-2">
                  <LogOut size={14}/> Abort Connection
               </button>
           </div>
       </div>
-  );
+  } />
 
-  if (view === 'referee') return (
+  <Route path="/referee" element={
     <div className="min-h-screen bg-[#050b14] text-white p-4 md:p-8 flex items-center justify-center animate-fade-in relative overflow-hidden">
         <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150 mix-blend-overlay pointer-events-none"></div>
         <div className="max-w-3xl w-full relative z-10 glass p-6 md:p-10 rounded-[1.5rem] md:rounded-[2rem] border border-white/10 shadow-2xl backdrop-blur-xl bg-black/40">
@@ -1140,17 +1154,15 @@ function AppContent() {
                 </div>
             )}
             
-            <button onClick={()=>setView('login')} className="block w-full text-center text-slate-600 mt-8 hover:text-white uppercase tracking-[0.2em] text-[10px] font-bold transition-colors">
+            <button onClick={()=>navigate('/')} className="block w-full text-center text-slate-600 mt-8 hover:text-white uppercase tracking-[0.2em] text-[10px] font-bold transition-colors">
                 Termiate Audit Session
             </button>
         </div>
     </div>
 
-  );
+  } />
 
-  if (view === 'streamer') { 
-
-    return (
+  <Route path="/streamer" element={
         <div className="min-h-screen bg-[#050b14] text-white p-6 pb-20 overflow-hidden relative animate-fade-in font-sans selection:bg-purple-500/30">
             <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150 mix-blend-overlay pointer-events-none"></div>
             
@@ -1192,7 +1204,7 @@ function AppContent() {
                         </p>
                     </div>
                 </div>
-                <button onClick={() => setView('login')} className="w-full md:w-auto bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 px-6 py-3 rounded-xl font-black text-[10px] tracking-widest uppercase transition-all hover:scale-105 active:scale-95 shadow-lg shadow-red-900/10">
+                <button onClick={() => navigate('/')} className="w-full md:w-auto bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 px-6 py-3 rounded-xl font-black text-[10px] tracking-widest uppercase transition-all hover:scale-105 active:scale-95 shadow-lg shadow-red-900/10">
                     TERMINATE FEED
                 </button>
             </header>
@@ -1243,10 +1255,10 @@ function AppContent() {
                 </div>
             </div>
         </div>
-    );
-  }
 
-  if (view === 'moderator') return (
+  } />
+
+  <Route path="/moderator" element={
     <ProtectedRoute requiredRole="moderator">
     <div className="min-h-screen bg-[#050b14] text-white p-8 animate-fade-in relative overflow-x-hidden">
         <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150 mix-blend-overlay pointer-events-none"></div>
@@ -1264,7 +1276,7 @@ function AppContent() {
                     </div>
                 </div>
                 <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
-                    <button onClick={() => setView('login')} className="w-full md:w-auto group bg-slate-800/80 hover:bg-slate-700 border border-white/10 hover:border-white/20 px-6 py-3 md:px-8 md:py-4 rounded-xl font-black flex items-center justify-center gap-3 text-xs tracking-widest uppercase transition-all shadow-lg hover:shadow-xl active:scale-95">
+                    <button onClick={() => navigate('/')} className="w-full md:w-auto group bg-slate-800/80 hover:bg-slate-700 border border-white/10 hover:border-white/20 px-6 py-3 md:px-8 md:py-4 rounded-xl font-black flex items-center justify-center gap-3 text-xs tracking-widest uppercase transition-all shadow-lg hover:shadow-xl active:scale-95">
                         <LogOut size={18} className="text-slate-400 group-hover:text-white transition-colors"/> <span className="text-slate-400 group-hover:text-white transition-colors">Disconnect</span>
                     </button>
                     <div className="flex flex-col md:flex-row gap-4 w-full md:w-auto">
@@ -1417,10 +1429,10 @@ function AppContent() {
         </div>
     </div>
     </ProtectedRoute>
-  );
 
-  // --- GAME VIEW ---
-  return (
+  } />
+
+  <Route path="/game" element={<>
     <div className="min-h-screen text-white flex flex-col lg:flex-row font-sans lg:overflow-hidden bg-[#050b14] relative">
       <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150 mix-blend-overlay pointer-events-none fixed"></div>
       
@@ -1652,6 +1664,9 @@ function AppContent() {
             </div>
       </div>
     </div>
+  </>} />
+  <Route path="*" element={<Navigate to="/" replace />} />
+</Routes>
   );
 }
 
