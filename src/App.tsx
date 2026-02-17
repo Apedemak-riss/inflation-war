@@ -458,11 +458,13 @@ function AppContent() {
   useEffect(() => {
     if (location.pathname === '/game' && teamId) {
       fetchGameState();
-      const ch = supabase.channel('game')
+      console.log('[Realtime] Subscribing to game updates for team:', teamId);
+      const ch = supabase.channel(`game-${teamId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'teams', filter: `id=eq.${teamId}` }, p => { if(p.new && (p.new as any).budget !== undefined) setTeamBudget((p.new as any).budget); })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'purchases', filter: `team_id=eq.${teamId}` }, () => fetchGameState())
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'players', filter: `id=eq.${playerId}` }, async (payload) => {
             if (payload.new && payload.new.team_id !== teamId) {
+                console.log('[Realtime] Player moved to new team:', payload.new.team_id);
                 alert("Moved to new team. Army reset.");
                 const newTid = payload.new.team_id;
                 localStorage.setItem('iw_tid', newTid);
@@ -471,17 +473,22 @@ function AppContent() {
             }
         })
         .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'teams', filter: `id=eq.${teamId}` }, () => {
-            alert("Team disbanded by moderator.");
-            localStorage.removeItem('iw_pid'); localStorage.removeItem('iw_tid'); localStorage.removeItem('iw_lobby');
-            setPlayerId(null); setTeamId(null); setFoundLobby(null); setLobbyCode(''); navigate('/');
+             alert("Team disbanded by moderator.");
+             localStorage.removeItem('iw_pid'); localStorage.removeItem('iw_tid'); localStorage.removeItem('iw_lobby');
+             setPlayerId(null); setTeamId(null); setFoundLobby(null); setLobbyCode(''); navigate('/');
         })
         .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'players', filter: `id=eq.${playerId}` }, () => {
             alert("You have been removed from the match.");
             localStorage.removeItem('iw_pid'); localStorage.removeItem('iw_tid'); localStorage.removeItem('iw_lobby');
             setPlayerId(null); setTeamId(null); setFoundLobby(null); setLobbyCode(''); navigate('/');
         })
-        .subscribe();
-      return () => { supabase.removeChannel(ch); };
+        .subscribe((status) => {
+            console.log('[Realtime] Subscription status:', status);
+        });
+      return () => { 
+          console.log('[Realtime] Unsubscribing from game updates for team:', teamId);
+          supabase.removeChannel(ch); 
+      };
     }
     if (foundLobby && (location.pathname === '/moderator' || location.pathname === '/streamer')) {
       const ch = supabase.channel('admin')
