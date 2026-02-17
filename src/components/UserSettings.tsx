@@ -219,7 +219,7 @@ export function UserSettings({ onBack }: { onBack: () => void }) {
               type="text"
               value={callsign}
               onChange={e => setCallsign(e.target.value)}
-              className={`${inputClasses} relative z-10 text-center uppercase tracking-wider focus:border-yellow-500/40`}
+              className={`${inputClasses} relative z-10 text-center tracking-wider focus:border-yellow-500/40`}
               placeholder="VIPER"
               maxLength={20}
             />
@@ -429,7 +429,7 @@ export function UserSettings({ onBack }: { onBack: () => void }) {
                     type="text"
                     value={deleteConfirm}
                     onChange={e => setDeleteConfirm(e.target.value)}
-                    className="w-full bg-red-900/10 border border-red-500/20 rounded-xl p-4 text-sm font-bold text-red-500 placeholder:text-red-500/20 outline-none focus:border-red-500/50 transition-colors text-center tracking-widest uppercase"
+                    className="w-full bg-red-900/10 border border-red-500/20 rounded-xl p-4 text-sm font-bold text-red-500 placeholder:text-red-500/20 outline-none focus:border-red-500/50 transition-colors text-center tracking-widest"
                     placeholder="CONFIRM"
                     maxLength={7}
                     onPaste={e => e.preventDefault()}

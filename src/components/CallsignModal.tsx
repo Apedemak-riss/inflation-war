@@ -93,7 +93,7 @@ export function CallsignModal() {
                 type="text"
                 value={callsign}
                 onChange={e => setCallsign(e.target.value)}
-                className="w-full bg-transparent p-4 text-lg font-black text-center uppercase tracking-wider outline-none text-white placeholder:text-slate-700"
+                className="w-full bg-transparent p-4 text-lg font-black text-center tracking-wider outline-none text-white placeholder:text-slate-700"
                 placeholder="VIPER"
                 maxLength={20}
                 autoFocus
