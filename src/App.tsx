@@ -249,6 +249,7 @@ function AppContent() {
   const [modLoading, setModLoading] = useState(false);
   const [deployLoading, setDeployLoading] = useState(false);
   const [streamerLoading, setStreamerLoading] = useState(false);
+  const [isLocked, setIsLocked] = useState(false);
   
   const [refLinks, setRefLinks] = useState(['', '', '']);
   const [refResult, setRefResult] = useState<number | null>(null);
@@ -287,9 +288,9 @@ function AppContent() {
       const storedTid = localStorage.getItem('iw_tid');
       const storedLobby = localStorage.getItem('iw_lobby');
       if (storedPid && storedTid && storedLobby) {
-          const { data: player } = await supabase.from('players').select('id, name, team_id').eq('id', storedPid).single();
+          const { data: player } = await supabase.from('players').select('id, name, team_id, is_locked').eq('id', storedPid).single();
           if (player && player.team_id === storedTid) {
-              setPlayerId(player.id); setTeamId(player.team_id); setPlayerName(player.name); setLobbyCode(storedLobby);
+              setPlayerId(player.id); setTeamId(player.team_id); setPlayerName(player.name); setLobbyCode(storedLobby); setIsLocked(player.is_locked || false);
               const { data: lobby } = await supabase.from('lobbies').select('*').eq('code', storedLobby).single();
               if (lobby) { setFoundLobby(lobby); const { data: team } = await supabase.from('teams').select('name').eq('id', storedTid).single(); setTeamName(team?.name || ''); navigate('/game'); }
           }
@@ -298,7 +299,7 @@ function AppContent() {
   };
 
   const fetchTeams = async (lId: string) => {
-    const { data: teams } = await supabase.from('teams').select('*, players(id, name, army_link, purchases(item_id, equipped_hero, is_cc))').eq('lobby_id', lId).order('name');
+    const { data: teams } = await supabase.from('teams').select('*, players(id, name, army_link, is_locked, purchases(item_id, equipped_hero, is_cc))').eq('lobby_id', lId).order('name');
     if (teams) setLobbyTeams(teams);
   };
 
@@ -471,16 +472,17 @@ function AppContent() {
                 const { data: t } = await supabase.from('teams').select('name').eq('id', newTid).single();
                 setTeamId(newTid); setTeamName(t?.name || ''); setMyPurchases([]); setTeamPurchases([]);
             }
+            if (payload.new && payload.new.is_locked !== undefined) setIsLocked(payload.new.is_locked);
         })
         .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'teams', filter: `id=eq.${teamId}` }, () => {
              alert("Team disbanded by moderator.");
              localStorage.removeItem('iw_pid'); localStorage.removeItem('iw_tid'); localStorage.removeItem('iw_lobby');
-             setPlayerId(null); setTeamId(null); setFoundLobby(null); setLobbyCode(''); navigate('/');
+             setPlayerId(null); setTeamId(null); setFoundLobby(null); setLobbyCode(''); setIsLocked(false); navigate('/');
         })
         .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'players', filter: `id=eq.${playerId}` }, () => {
             alert("You have been removed from the match.");
             localStorage.removeItem('iw_pid'); localStorage.removeItem('iw_tid'); localStorage.removeItem('iw_lobby');
-            setPlayerId(null); setTeamId(null); setFoundLobby(null); setLobbyCode(''); navigate('/');
+            setPlayerId(null); setTeamId(null); setFoundLobby(null); setLobbyCode(''); setIsLocked(false); navigate('/');
         })
         .subscribe((status) => {
             console.log('[Realtime] Subscription status:', status);
@@ -499,6 +501,7 @@ function AppContent() {
              alert("Lobby has been deleted.");
              setFoundLobby(null);
              setLobbyCode('');
+             setIsLocked(false);
              navigate('/');
         })
         .subscribe();
@@ -515,6 +518,7 @@ function AppContent() {
 
   const handleBuy = async (item: Item, targetHero: string | null = null, isCC: boolean = false) => {
     if (isProcessing) return;
+    if (isLocked) return alert("ARMY LOCKED: You cannot modify your deployment.");
     if (!isCC && (targetHero || item.hero)) {
         const activeH = new Set();
         myPurchases.forEach(p => { if(!p.is_cc) { if(p.equipped_hero) activeH.add(p.equipped_hero); const i=dbItems.find(x=>x.id===p.item_id); if(i?.hero) activeH.add(i.hero); }});
@@ -552,8 +556,9 @@ function AppContent() {
     fetchGameState(); setIsProcessing(false);
   };
 
-  const handleSell = async (item: Item) => { await supabase.rpc('sell_item', { p_player_id: playerId, p_item_id: item.id }); fetchGameState(); };
+  const handleSell = async (item: Item) => { if (isLocked) return alert("ARMY LOCKED"); await supabase.rpc('sell_item', { p_player_id: playerId, p_item_id: item.id }); fetchGameState(); };
   const handleLeave = async () => { 
+    if (isLocked) return alert("ARMY LOCKED: You cannot leave the match once committed.");
     if(confirm("Are you sure you want to leave the match? converting all your assets back to gold for the team...")) { 
         setIsProcessing(true);
         if(playerId) {
@@ -573,6 +578,7 @@ function AppContent() {
   };
 
   const handleClearArmy = async () => {
+      if (isLocked) return alert("ARMY LOCKED");
       if (myPurchases.length === 0) return;
       if (confirm("Are you sure you want to scrap your entire deployment? This will refund all gold to the team budget.")) {
           setIsProcessing(true);
@@ -626,6 +632,15 @@ function AppContent() {
   };
 
   const exportArmy = async () => {
+    if (isLocked) {
+         if(playerId) {
+             const { data } = await supabase.from('players').select('army_link').eq('id', playerId).single();
+             if (data?.army_link) window.open(data.army_link, '_blank');
+         }
+         return;
+    }
+    if (!confirm("CONFIRM DEPLOYMENT?\n\nThis will LOCK your army and prevent further changes.\n\nAre you sure you are ready?")) return;
+
     const getItem = (id: string) => dbItems.find(i => i.id === id);
     const gen = (list: any[], types: string[]) => {
         const rel = list.map(p => getItem(p.item_id)).filter(i => i && types.includes(i.type)) as Item[];
@@ -652,7 +667,14 @@ function AppContent() {
     
     const link = hStr + ccStr + mainStr;
     const url = `https://link.clashofclans.com/en?action=CopyArmy&army=${link}`;
-    if (playerId) await supabase.from('players').update({ army_link: url }).eq('id', playerId);
+    
+    if (playerId) {
+        setIsProcessing(true);
+        const { error } = await supabase.rpc('lock_player_army', { p_player_id: playerId, p_army_link: url });
+        if (error) alert("Error locking army: " + error.message);
+        else setIsLocked(true);
+        setIsProcessing(false);
+    }
     window.open(url, '_blank');
   };
 
@@ -741,6 +763,23 @@ function AppContent() {
   };
 
   const handleRenameTeam = async (tId: string) => { if(!tempTeamName.trim()) return; await supabase.rpc('moderator_rename_team', { p_team_id: tId, p_new_name: tempTeamName }); setEditingTeamId(null); fetchTeams(foundLobby.id); };
+  
+  const handleEndMatch = async () => {
+      if (!confirm("CONFIRM END MATCH?\n\nThis will UNLOCK all players and DELETE the lobby.\n\nType 'CONFIRM' to proceed.")) return;
+      // Note: Simplified confirmation for now as requested "Clicking it requires a confirmation" - we can add text input if needed but native confirm is safer/faster dev
+      setModLoading(true);
+      try {
+          const { error } = await supabase.rpc('end_match_temp', { p_lobby_id: foundLobby.id });
+          if (error) throw error;
+          alert("Match Ended. Lobby cleared.");
+          setFoundLobby(null); setLobbyCode(''); navigate('/');
+      } catch (err: any) {
+          alert("Error: " + err.message);
+      } finally {
+          setModLoading(false);
+      }
+  };
+
   const handleNuke = async () => { 
     if(confirm("DELETE LOBBY? This action cannot be undone.")) {
         await supabase.rpc('delete_lobby', { p_lobby_id: foundLobby.id });
@@ -1286,9 +1325,19 @@ function AppContent() {
                                 <div key={p.id} onClick={() => setFocusedPlayer(p)} className="glass bg-black/40 rounded-[1.5rem] p-6 border border-white/5 hover:border-blue-500/50 transition-all cursor-zoom-in group/card hover:shadow-[0_0_50px_rgba(59,130,246,0.1)] hover:-translate-y-1 duration-300 relative overflow-hidden">
                                     <div className="absolute inset-0 bg-gradient-to-r from-blue-500/0 via-blue-500/5 to-blue-500/0 translate-x-[-100%] group-hover/card:translate-x-[100%] transition-transform duration-1000 pointer-events-none"></div>
                                     <div className="flex justify-between items-center border-b border-white/5 pb-4 mb-4 relative z-10">
-                                        <div className="font-black text-3xl tracking-tight text-slate-200 group-hover/card:text-blue-400 transition-colors drop-shadow-md">{p.name}</div>
-                                        <div className="text-[9px] text-blue-400/70 uppercase font-black tracking-widest bg-blue-900/10 px-3 py-1.5 rounded-lg border border-blue-500/10 group-hover/card:bg-blue-500 group-hover/card:text-black transition-all shadow-sm flex items-center gap-2">
-                                            <Crosshair size={12}/> Inspect Loadout
+                                        <div className="flex items-center gap-3">
+                                            <div className="font-black text-3xl tracking-tight text-slate-200 group-hover/card:text-blue-400 transition-colors drop-shadow-md">{p.name}</div>
+                                            {p.is_locked && <div className="px-2 py-1 bg-red-500/20 border border-red-500/50 rounded text-[9px] font-black text-red-400 uppercase tracking-widest flex items-center gap-1"><Lock size={10}/></div>}
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            {p.army_link && (
+                                                <a href={p.army_link} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="bg-yellow-500/10 hover:bg-yellow-500/30 text-yellow-400 border border-yellow-500/30 p-2 rounded-lg transition-all hover:scale-110 active:scale-95" title="Open Army Link">
+                                                    <ExternalLink size={14}/>
+                                                </a>
+                                            )}
+                                            <div className="text-[9px] text-blue-400/70 uppercase font-black tracking-widest bg-blue-900/10 px-3 py-1.5 rounded-lg border border-blue-500/10 group-hover/card:bg-blue-500 group-hover/card:text-black transition-all shadow-sm flex items-center gap-2">
+                                                <Crosshair size={12}/> Inspect Loadout
+                                            </div>
                                         </div>
                                     </div>
                                     <div className="relative z-10">{renderPlayerArmy(p, true)}</div>
@@ -1337,6 +1386,10 @@ function AppContent() {
                         <LogOut size={18} className="text-slate-400 group-hover:text-white transition-colors"/> <span className="text-slate-400 group-hover:text-white transition-colors">Disconnect</span>
                     </button>
                     <div className="flex flex-col md:flex-row gap-4 w-full md:w-auto">
+                        <button onClick={handleEndMatch} className="w-full md:w-auto group bg-green-600 hover:bg-green-500 px-6 py-3 md:px-8 md:py-4 rounded-xl font-black flex items-center justify-center gap-3 text-xs tracking-widest uppercase transition-all shadow-[0_0_30px_rgba(34,197,94,0.4)] hover:shadow-[0_0_50px_rgba(34,197,94,0.6)] hover:-translate-y-1 active:translate-y-0 relative overflow-hidden">
+                            <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
+                            <Check size={18} className="relative z-10"/> <span className="relative z-10">END MATCH</span>
+                        </button>
                         {import.meta.env.VITE_ENABLE_SANDBOX === 'true' && (
                             <button onClick={() => setShowSandbox(!showSandbox)} className="w-full md:w-auto group bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/30 px-6 py-3 md:px-8 md:py-4 rounded-xl font-black flex items-center justify-center gap-3 text-xs tracking-widest uppercase transition-all shadow-lg text-blue-400 hover:text-blue-300 active:scale-95">
                                 <Settings size={18} className="group-hover:rotate-90 transition-transform duration-500"/> <span>{showSandbox ? 'Close Sandbox' : 'Economy Sandbox'}</span>
@@ -1466,9 +1519,15 @@ function AppContent() {
                                                 </a>
                                             )}
                                         </div>
-                                        <div className="flex gap-3">
-                                            <button onClick={() => handleSwitch(p.id, team.name)} className="p-3 bg-blue-500/10 border border-blue-500/20 hover:bg-blue-600 hover:text-white rounded-xl text-blue-400 transition-all hover:shadow-[0_0_20px_rgba(59,130,246,0.4)]" title="Switch Teams"><ArrowRightLeft size={18}/></button>
-                                            <button onClick={() => handleKick(p.id)} className="p-3 bg-red-500/10 border border-red-500/20 hover:bg-red-600 hover:text-white rounded-xl text-red-500 transition-all hover:shadow-[0_0_20px_rgba(239,68,68,0.4)]" title="Kick Player"><Skull size={18}/></button>
+                                        {p.is_locked && <div className="ml-4 px-2 py-1 bg-red-500/20 border border-red-500/50 rounded text-[10px] font-black text-red-400 uppercase tracking-widest flex items-center gap-2"><Lock size={10}/> LOCKED</div>}
+                                        <div className="flex gap-3 ml-auto">
+
+                                            {!p.is_locked && (
+                                                <>
+                                                    <button onClick={() => handleSwitch(p.id, team.name)} className="p-3 bg-blue-500/10 border border-blue-500/20 hover:bg-blue-600 hover:text-white rounded-xl text-blue-400 transition-all hover:shadow-[0_0_20px_rgba(59,130,246,0.4)]" title="Switch Teams"><ArrowRightLeft size={18}/></button>
+                                                    <button onClick={() => handleKick(p.id)} className="p-3 bg-red-500/10 border border-red-500/20 hover:bg-red-600 hover:text-white rounded-xl text-red-500 transition-all hover:shadow-[0_0_20px_rgba(239,68,68,0.4)]" title="Kick Player"><Skull size={18}/></button>
+                                                </>
+                                            )}
                                         </div>
                                     </div>
                                     {renderPlayerArmy(p)}
@@ -1555,9 +1614,11 @@ function AppContent() {
                     <Coins className="text-yellow-400 drop-shadow-[0_0_10px_rgba(234,179,8,0.5)] w-5 h-5 lg:w-6 lg:h-6"/>
                 </div>
                 
+                {!isLocked && (
                 <button onClick={handleLeave} className="bg-red-500/10 hover:bg-red-500/20 p-2 lg:p-4 rounded-xl lg:rounded-2xl text-red-500 hover:text-red-400 transition-all border border-red-500/20 hover:border-red-500/40 hover:shadow-[0_0_20px_rgba(239,68,68,0.2)] group" title="Exit Match">
                     <LogOut className="w-5 h-5 lg:w-6 lg:h-6 group-hover:-translate-x-1 transition-transform" strokeWidth={2.5} />
                 </button>
+                )}
             </div>
         </header>
 
@@ -1652,10 +1713,16 @@ function AppContent() {
 
         {/* Floating Export Button */}
         <div className="fixed bottom-0 left-0 w-full lg:w-[calc(100%-24rem)] pointer-events-none p-4 lg:p-10 z-[100] flex justify-center bg-gradient-to-t from-[#050b14] to-transparent">
-            <button onClick={exportArmy} className="pointer-events-auto bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 px-6 py-4 lg:px-16 lg:py-6 rounded-2xl font-black flex gap-3 lg:gap-4 items-center justify-center transition-all shadow-[0_0_50px_rgba(34,197,94,0.3)] hover:shadow-[0_0_80px_rgba(34,197,94,0.5)] active:scale-95 text-sm lg:text-base uppercase tracking-[0.2em] text-white border border-green-400/30 backdrop-blur-md hover:-translate-y-2 duration-300 relative overflow-hidden group w-full lg:w-auto">
-                <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-500"></div>
-                <ExternalLink size={20} className="lg:w-6 lg:h-6 relative z-10" strokeWidth={3}/> <span className="relative z-10">GENERATE LINK</span>
-            </button>
+            {isLocked ? (
+                <button onClick={exportArmy} className="pointer-events-auto bg-slate-800/80 hover:bg-slate-700 px-6 py-4 lg:px-16 lg:py-6 rounded-2xl font-black flex gap-3 lg:gap-4 items-center justify-center transition-all shadow-xl text-sm lg:text-base uppercase tracking-[0.2em] text-slate-400 border border-white/10 backdrop-blur-md w-full lg:w-auto">
+                     <Lock size={20} className="lg:w-6 lg:h-6"/> LOCKED & DEPLOYED
+                </button>
+            ) : (
+                <button onClick={exportArmy} className="pointer-events-auto bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 px-6 py-4 lg:px-16 lg:py-6 rounded-2xl font-black flex gap-3 lg:gap-4 items-center justify-center transition-all shadow-[0_0_50px_rgba(34,197,94,0.3)] hover:shadow-[0_0_80px_rgba(34,197,94,0.5)] active:scale-95 text-sm lg:text-base uppercase tracking-[0.2em] text-white border border-green-400/30 backdrop-blur-md hover:-translate-y-2 duration-300 relative overflow-hidden group w-full lg:w-auto">
+                    <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-500"></div>
+                    <ExternalLink size={20} className="lg:w-6 lg:h-6 relative z-10" strokeWidth={3}/> <span className="relative z-10">LOCK & GENERATE LINK</span>
+                </button>
+            )}
         </div>
       </div>
       
@@ -1672,7 +1739,7 @@ function AppContent() {
                         <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Live Loadout</div>
                     </div>
                 </div>
-                {myPurchases.length > 0 && (
+                {myPurchases.length > 0 && !isLocked && (
                     <button onClick={handleClearArmy} disabled={isProcessing} className="p-3 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 rounded-xl transition-all shadow-[0_0_15px_rgba(239,68,68,0.1)] hover:shadow-[0_0_20px_rgba(239,68,68,0.3)] active:scale-95 group" title="Clear Entire Army">
                         <Trash2 size={20} className="group-hover:scale-110 transition-transform" />
                     </button>
