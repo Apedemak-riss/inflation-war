@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { ArrowLeft, Trophy, Users, Copy, Check, X } from 'lucide-react';
+import { ArrowLeft, Trophy, Users, Copy, Check, X, Search } from 'lucide-react';
 
 export const MatchLogs = () => {
     const navigate = useNavigate();
@@ -9,6 +9,7 @@ export const MatchLogs = () => {
     const [loading, setLoading] = useState(true);
     const [selectedMatch, setSelectedMatch] = useState<any | null>(null);
     const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+    const [searchTerm, setSearchTerm] = useState('');
 
     useEffect(() => {
         fetchLogs();
@@ -19,7 +20,8 @@ export const MatchLogs = () => {
             const { data, error } = await supabase
                 .from('match_logs')
                 .select('*')
-                .order('played_at', { ascending: false });
+                .order('played_at', { ascending: false })
+                .limit(100);
             if (error) throw error;
             setLogs(data || []);
         } catch (err) {
@@ -41,6 +43,20 @@ export const MatchLogs = () => {
         });
     };
 
+    const filteredLogs = logs.filter(log => {
+        const term = searchTerm.toLowerCase();
+        if (!term) return true;
+        
+        // Search in Lobby Name
+        if (log.lobby_name?.toLowerCase().includes(term)) return true;
+        
+        // Search in Match Data (Teams and Players)
+        return log.match_data?.some((team: any) => 
+            team.team_name?.toLowerCase().includes(term) ||
+            team.players?.some((player: any) => player.name?.toLowerCase().includes(term))
+        );
+    });
+
     return (
         <div className="min-h-screen bg-[#050b14] text-white p-6 pb-20 overflow-x-hidden relative animate-fade-in font-sans selection:bg-purple-500/30">
             <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150 mix-blend-overlay pointer-events-none fixed"></div>
@@ -61,6 +77,20 @@ export const MatchLogs = () => {
                             Historical Combat Data // Secure Access
                         </p>
                     </div>
+
+                    {/* Search Bar */}
+                    <div className="w-full md:w-96 relative group">
+                        <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
+                            <Search className="w-4 h-4 text-slate-500 group-focus-within:text-purple-400 transition-colors" />
+                        </div>
+                        <input 
+                            type="text" 
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            placeholder="Search by player, team, or lobby..." 
+                            className="w-full bg-[#0a101f] border border-white/10 focus:border-purple-500/50 rounded-xl py-3 pl-11 pr-4 text-sm font-mono text-white placeholder:text-slate-600 outline-none transition-all shadow-inner focus:shadow-[0_0_20px_rgba(168,85,247,0.1)]"
+                        />
+                    </div>
                 </div>
             </div>
 
@@ -70,13 +100,13 @@ export const MatchLogs = () => {
                     <div className="flex justify-center py-20">
                         <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
                     </div>
-                ) : logs.length === 0 ? (
+                ) : filteredLogs.length === 0 ? (
                     <div className="text-center py-20 border border-dashed border-white/10 rounded-3xl bg-white/5">
-                        <p className="text-slate-500 font-mono text-sm tracking-widest uppercase">No Match Data Found in Archives</p>
+                        <p className="text-slate-500 font-mono text-sm tracking-widest uppercase">No matches found matching "{searchTerm}"</p>
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {logs.map(log => (
+                        {filteredLogs.map(log => (
                             <div key={log.id} onClick={() => setSelectedMatch(log)} className="glass bg-[#0a101f]/60 hover:bg-[#0a101f] border border-white/5 hover:border-purple-500/30 rounded-2xl p-6 cursor-pointer transition-all hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(168,85,247,0.1)] group">
                                 <div className="flex justify-between items-start mb-4">
                                     <div className="bg-purple-900/20 text-purple-300 px-3 py-1 rounded-lg border border-purple-500/20 text-[10px] font-bold uppercase tracking-wider flex items-center gap-2">
