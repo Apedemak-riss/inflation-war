@@ -6,6 +6,7 @@ import { LoginView } from './components/LoginView';
 import { CallsignModal } from './components/CallsignModal';
 import { ProfileBadge } from './components/ProfileBadge';
 import { UserSettings } from './components/UserSettings';
+import { MatchLogs } from './components/MatchLogs';
 
 import { Shield, Sword, Coins, ExternalLink, Hammer, Crown, Minus, Check, Users, RefreshCw, Trash2, Trophy, ArrowRightLeft, LogOut, Gavel, MonitorPlay, ClipboardCheck, AlertTriangle, Loader2, Edit2, Save, X, Tv, PawPrint, Castle, Terminal, Wifi, Lock, Zap, Skull, Hexagon, Crosshair, Settings } from 'lucide-react';
 
@@ -765,13 +766,22 @@ function AppContent() {
   const handleRenameTeam = async (tId: string) => { if(!tempTeamName.trim()) return; await supabase.rpc('moderator_rename_team', { p_team_id: tId, p_new_name: tempTeamName }); setEditingTeamId(null); fetchTeams(foundLobby.id); };
   
   const handleEndMatch = async () => {
-      if (!confirm("CONFIRM END MATCH?\n\nThis will UNLOCK all players and DELETE the lobby.\n\nType 'CONFIRM' to proceed.")) return;
-      // Note: Simplified confirmation for now as requested "Clicking it requires a confirmation" - we can add text input if needed but native confirm is safer/faster dev
+      const teamScores: Record<string, string> = {};
+      
+      // Prompt for each team's score
+      for (const team of lobbyTeams) {
+          const score = prompt(`ENTER SCORE FOR ${team.name}:`);
+          if (score === null) return; // User cancelled
+          teamScores[team.id] = score;
+      }
+
+      if (!confirm(`CONFIRM END MATCH?\n\nThis will ARCHIVE the match with the entered scores and DELETE the lobby.\n\nType 'CONFIRM' to proceed.`)) return;
+      
       setModLoading(true);
       try {
-          const { error } = await supabase.rpc('end_match_temp', { p_lobby_id: foundLobby.id });
+          const { error } = await supabase.rpc('end_match_secure', { p_lobby_id: foundLobby.id, p_team_scores: teamScores });
           if (error) throw error;
-          alert("Match Ended. Lobby cleared.");
+          alert("Match Archived & Lobby Cleared.");
           setFoundLobby(null); setLobbyCode(''); navigate('/');
       } catch (err: any) {
           alert("Error: " + err.message);
@@ -1113,9 +1123,24 @@ function AppContent() {
                               {streamerLoading ? <><div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" /> VERIFYING...</> : <><MonitorPlay size={14} /> STREAMER</>}
                           </span>
                       </button>
+
+                      {/* Match Archive Button */}
+                      <button 
+                        type="button"
+                        onClick={() => navigate('/logs')}
+                        className="col-span-2 group/btn relative overflow-hidden font-black py-4 rounded-xl border border-white/5 bg-slate-800/40 hover:bg-slate-700/50 hover:border-white/20 transition-all duration-300 shadow-lg flex items-center justify-center text-slate-400 hover:text-white"
+                      >
+                         <div className="absolute inset-0 bg-gradient-to-r from-blue-500/0 via-purple-500/10 to-blue-500/0 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-1000"></div>
+                         <span className="relative z-10 tracking-widest text-xs flex items-center justify-center gap-3">
+                            <div className="w-1.5 h-1.5 bg-purple-500 rounded-full group-hover/btn:animate-ping"/>
+                            MATCH ARCHIVE
+                         </span>
+                      </button>
                     </div>
                 </form>
             </div>
+
+
             
             {/* Referee Access (Moderator Only) */}
             {profile?.role === 'moderator' && (
@@ -1171,6 +1196,8 @@ function AppContent() {
           <UserSettings />
         </ProtectedRoute>
       } />
+      
+      <Route path="/logs" element={<MatchLogs />} />
       
       <Route path="/join/:code" element={<><LobbyCodeSync setLobbyCode={setLobbyCode} />{teamSelectionView}</>} />
       <Route path="/join" element={teamSelectionView} />
