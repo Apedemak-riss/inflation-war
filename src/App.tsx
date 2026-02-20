@@ -248,10 +248,17 @@ function AppContent() {
 
   const [showOverseerModal, setShowOverseerModal] = useState(false);
   const [matchType, setMatchType] = useState<'custom' | 'official'>('custom');
-  const [allRosters, setAllRosters] = useState<{id:string, name:string, tag:string}[]>([]);
+  const [allRosters, setAllRosters] = useState<{id:string, name:string, tag:string, challonge_participant_id?: string | null}[]>([]);
   const [activeLobbies, setActiveLobbies] = useState<any[]>([]);
   const [selectedTeamA, setSelectedTeamA] = useState<string | null>(null);
   const [selectedTeamB, setSelectedTeamB] = useState<string | null>(null);
+
+  const [linkBracket, setLinkBracket] = useState(false);
+  const [tournamentUrl, setTournamentUrl] = useState('');
+  const [openMatches, setOpenMatches] = useState<any[]>([]);
+  const [challongeMatchId, setChallongeMatchId] = useState<string | null>(null);
+  const [isFetchingMatches, setIsFetchingMatches] = useState(false);
+  const [challongeParticipantMap, setChallongeParticipantMap] = useState<Record<string, string>>({});
 
   const [teamBudget, setTeamBudget] = useState(100);
   const [dbItems, setDbItems] = useState<Item[]>([]);
@@ -293,6 +300,53 @@ function AppContent() {
      }
   }, [user]);
 
+  // Handle Automated Bracket Auto-Fetch
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
+    
+    if (showOverseerModal && linkBracket && tournamentUrl.trim().length > 0) {
+        setIsFetchingMatches(true);
+        timeoutId = setTimeout(async () => {
+            try {
+                const { fetchOpenMatches, fetchParticipants } = await import('./services/challongeService');
+                const [matches, participants] = await Promise.all([
+                    fetchOpenMatches(tournamentUrl.trim()),
+                    fetchParticipants(tournamentUrl.trim())
+                ]);
+                
+                const pMap: Record<string, string> = {};
+                if (participants && Array.isArray(participants)) {
+                    participants.forEach((p: any) => {
+                        if (p.participant && p.participant.id) {
+                            const name = p.participant.name || p.participant.display_name || p.participant.username || `Participant ${p.participant.id}`;
+                            pMap[p.participant.id.toString()] = name;
+                            
+                            // Also map group_player_ids if they exist (used in some bracket types)
+                            if (p.participant.group_player_ids && Array.isArray(p.participant.group_player_ids)) {
+                                p.participant.group_player_ids.forEach((gId: number) => {
+                                    pMap[gId.toString()] = name;
+                                });
+                            }
+                        }
+                    });
+                }
+                setChallongeParticipantMap(pMap);
+                setOpenMatches(matches);
+            } catch (err: any) {
+                console.error("Failed to auto-fetch matches:", err);
+                setOpenMatches([]);
+            } finally {
+                setIsFetchingMatches(false);
+            }
+        }, 500); // 500ms debounce
+    } else {
+        setOpenMatches([]);
+        setIsFetchingMatches(false);
+    }
+    
+    return () => clearTimeout(timeoutId);
+  }, [showOverseerModal, linkBracket, tournamentUrl]);
+
   const checkDatabase = async () => {
     const { data } = await supabase.from('items').select('*');
     if (!data || data.length === 0) seedDatabase(); else setDbItems(data);
@@ -324,7 +378,7 @@ function AppContent() {
   };
 
   const fetchTeams = async (lId: string) => {
-    const { data: teams } = await supabase.from('teams').select('*, players(id, name, army_link, is_locked, purchases(item_id, equipped_hero, is_cc))').eq('lobby_id', lId).order('name');
+    const { data: teams } = await supabase.from('teams').select('*, players(id, name, army_link, is_locked, purchases(item_id, equipped_hero, is_cc))').eq('lobby_id', lId).order('created_at', { ascending: true });
     if (teams) setLobbyTeams(teams);
   };
 
@@ -387,7 +441,7 @@ function AppContent() {
     
     setModLoading(true);
     if (allRosters.length === 0) {
-        const { data, error } = await supabase.from('rosters').select('id, name, tag').order('name');
+        const { data, error } = await supabase.from('rosters').select('id, name, tag, challonge_participant_id').order('name');
         if (data) {
             setAllRosters(data);
             if (data.length >= 2) {
@@ -457,11 +511,13 @@ function AppContent() {
         
         const aId = matchType === 'official' ? selectedTeamA : null;
         const bId = matchType === 'official' ? selectedTeamB : null;
+        const cId = (matchType === 'official' && linkBracket) ? challongeMatchId : null;
 
         const res = await supabase.rpc('create_lobby', {
             p_lobby_name: code,
             p_team_a_roster_id: aId,
-            p_team_b_roster_id: bId
+            p_team_b_roster_id: bId,
+            p_challonge_match_id: cId
         });
         
         nl = res.data;
@@ -878,7 +934,47 @@ function AppContent() {
       }
 
       setModLoading(true);
+      
       try {
+          // Automated Bracket Advancement Logic
+          if (foundLobby.challonge_match_id) {
+              if (!tournamentUrl) {
+                  alert("Please enter the Tournament URL to auto-update the bracket. Otherwise, cancel and manually resolve.");
+                  setModLoading(false);
+                  return;
+              }
+              
+              // Calculate Winner
+              let winnerTeam: any = null;
+              let maxStars = -1;
+              let maxPct = -1;
+              for (const team of lobbyTeams) {
+                  const s = parseInt(endMatchScores[team.id].stars) || 0;
+                  const p = parseFloat(endMatchScores[team.id].percentage) || 0;
+                  if (s > maxStars || (s === maxStars && p > maxPct)) {
+                      maxStars = s;
+                      maxPct = p;
+                      winnerTeam = team;
+                  }
+              }
+              
+              const { data: wRoster } = await supabase.from('rosters').select('challonge_participant_id').eq('id', winnerTeam.roster_id).single();
+              const wChallongeId = wRoster?.challonge_participant_id;
+              
+              if (!wChallongeId) {
+                  alert(`Cannot advance bracket: Winning team (${winnerTeam.name}) has no linked Challonge ID.`);
+                  setModLoading(false);
+                  return;
+              }
+              
+              const teamAScore = parseInt(endMatchScores[lobbyTeams[0]?.id]?.stars) || 0;
+              const teamBScore = parseInt(endMatchScores[lobbyTeams[1]?.id]?.stars) || 0;
+              const scoresCsv = `${teamAScore}-${teamBScore}`;
+              
+              const { reportMatchScore } = await import('./services/challongeService');
+              await reportMatchScore(tournamentUrl, foundLobby.challonge_match_id, wChallongeId.toString(), scoresCsv);
+          }
+          
           const { error } = await supabase.rpc('end_match_secure', { p_lobby_id: foundLobby.id, p_team_scores: endMatchScores });
           if (error) throw error;
           alert("Match Archived & Lobby Cleared.");
@@ -889,6 +985,55 @@ function AppContent() {
       } finally {
           setModLoading(false);
       }
+  };
+
+  const handleSyncChallonge = async () => {
+    const tournamentUrl = prompt("Enter Challonge Tournament URL (e.g. cocelitetest1):");
+    if (!tournamentUrl) return;
+
+    try {
+        setModLoading(true);
+        const { fetchParticipants } = await import('./services/challongeService');
+        const data = await fetchParticipants(tournamentUrl);
+        
+        const { data: rosters, error } = await supabase.from('rosters').select('*');
+        if (error) throw error;
+        
+        let syncCount = 0;
+        console.log(`[Sync] Starting sync for ${data.length} participants...`, data);
+        for (const p of data) {
+            const pName = p.participant.name || p.participant.display_name || p.participant.username || '';
+            const cleanChallongeName = pName.toLowerCase().trim();
+            
+            const match = rosters?.find((r: any) => 
+                r.name.toLowerCase().trim() === cleanChallongeName || 
+                r.tag.toLowerCase().trim() === cleanChallongeName
+            );
+            
+            if (match) {
+                console.log(`[Sync] Matched: '${pName}' to DB Roster: '${match.name}'`);
+                
+                const { error: updateErr } = await supabase.rpc('set_challonge_participant', {
+                    p_roster_id: match.id,
+                    p_challonge_id: p.participant.id.toString()
+                });
+                    
+                if (updateErr) {
+                    console.error(`[Sync] \u274c SUPABASE RPC ERROR for ${match.name}:`, updateErr.message, updateErr.details);
+                } else {
+                    console.log(`[Sync] \u2705 Saved to DB via RPC: ${match.name} -> ${p.participant.id}`);
+                    syncCount++;
+                }
+            } else {
+                console.warn(`[Sync] FAILED TO MATCH: '${pName}'`);
+            }
+        }
+        alert(`Tournament Sync Complete! Synced ${syncCount} participants. Check console for details.`);
+    } catch (err: any) {
+        alert("Sync error: " + err.message);
+    } finally {
+        setModLoading(false);
+    }
   };
 
   const handleNuke = async () => { 
@@ -1568,6 +1713,10 @@ function AppContent() {
                                 <Settings size={18} className="group-hover:rotate-90 transition-transform duration-500"/> <span>{showSandbox ? 'Close Sandbox' : 'Economy Sandbox'}</span>
                             </button>
                         )}
+                        <button onClick={handleSyncChallonge} className="w-full md:w-auto group bg-purple-600 hover:bg-purple-500 px-6 py-3 md:px-8 md:py-4 rounded-xl font-black flex items-center justify-center gap-3 text-xs tracking-widest uppercase transition-all shadow-[0_0_30px_rgba(168,85,247,0.4)] hover:shadow-[0_0_50px_rgba(168,85,247,0.6)] hover:-translate-y-1 active:translate-y-0 relative overflow-hidden">
+                            <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
+                            <RefreshCw size={18} className="relative z-10 group-hover:animate-spin-slow"/> <span className="relative z-10">Sync Tournament IDs</span>
+                        </button>
                         <button onClick={handleNuke} className="w-full md:w-auto group bg-red-600 hover:bg-red-500 px-6 py-3 md:px-8 md:py-4 rounded-xl font-black flex items-center justify-center gap-3 text-xs tracking-widest uppercase transition-all shadow-[0_0_30px_rgba(239,68,68,0.4)] hover:shadow-[0_0_50px_rgba(239,68,68,0.6)] hover:-translate-y-1 active:translate-y-0 relative overflow-hidden">
                             <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
                             <Trash2 size={18} className="relative z-10"/> <span className="relative z-10">Execute Global Purge</span>
@@ -1985,17 +2134,91 @@ function AppContent() {
                 {matchType === 'official' && (
                     <div className="space-y-4 animate-fade-in">
                         <div className="p-6 bg-black/40 rounded-2xl border border-white/5 space-y-4">
-                            <div>
-                                <label className="block text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2">Team A Roster</label>
-                                <select value={selectedTeamA || ''} onChange={e => setSelectedTeamA(e.target.value)} className="w-full bg-[#050b14] border border-blue-500/30 rounded-xl p-4 font-bold outline-none text-blue-100 focus:border-blue-500 transition-colors">
-                                    {allRosters.map(r => <option key={r.id} value={r.id}>[{r.tag}] {r.name}</option>)}
-                                </select>
+                            <div className="flex items-center gap-3 mb-4">
+                                <input 
+                                    type="checkbox" 
+                                    id="linkBracket" 
+                                    checked={linkBracket} 
+                                    onChange={e => setLinkBracket(e.target.checked)}
+                                    className="w-4 h-4 accent-red-500 rounded cursor-pointer"
+                                />
+                                <label htmlFor="linkBracket" className="text-sm font-bold text-white cursor-pointer select-none">Link to Tournament Bracket</label>
                             </div>
-                            <div>
-                                <label className="block text-[10px] font-black text-purple-400 uppercase tracking-widest mb-2">Team B Roster</label>
-                                <select value={selectedTeamB || ''} onChange={e => setSelectedTeamB(e.target.value)} className="w-full bg-[#050b14] border border-purple-500/30 rounded-xl p-4 font-bold outline-none text-purple-100 focus:border-purple-500 transition-colors">
-                                    {allRosters.map(r => <option key={r.id} value={r.id}>[{r.tag}] {r.name}</option>)}
-                                </select>
+
+                            {linkBracket && (
+                                <div className="space-y-4 p-4 bg-red-900/10 border border-red-500/20 rounded-xl mb-4">
+                                    <div>
+                                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Tournament URL (e.g. cocelitetest1)</label>
+                                        <input 
+                                            type="text" 
+                                            placeholder="Tournament ID/URL"
+                                            value={tournamentUrl}
+                                            onChange={e => setTournamentUrl(e.target.value)}
+                                            className="w-full bg-[#050b14] border border-white/10 focus:border-red-500/50 rounded-xl p-3 font-bold text-white outline-none transition-colors"
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Select Open Match</label>
+                                        <select 
+                                            value={challongeMatchId || ''} 
+                                            onChange={(e) => {
+                                                const mId = e.target.value;
+                                                setChallongeMatchId(mId);
+                                                if (mId) {
+                                                    const m = openMatches.find((x: any) => x.match.id.toString() === mId);
+                                                    if (m) {
+                                                        const p1Id = m.match.player1_id?.toString();
+                                                        const p2Id = m.match.player2_id?.toString();
+                                                        const roster1 = allRosters.find(r => (r as any).challonge_participant_id === p1Id);
+                                                        const roster2 = allRosters.find(r => (r as any).challonge_participant_id === p2Id);
+                                                        if (roster1) setSelectedTeamA(roster1.id);
+                                                        if (roster2) setSelectedTeamB(roster2.id);
+                                                    }
+                                                }
+                                            }}
+                                            className="w-full bg-[#050b14] border border-red-500/30 rounded-xl p-3 font-bold outline-none text-white focus:border-red-500 transition-colors"
+                                            disabled={isFetchingMatches || openMatches.length === 0}
+                                        >
+                                            {isFetchingMatches ? (
+                                                <option value="">-- Loading Matches... --</option>
+                                            ) : openMatches.length === 0 ? (
+                                                <option value="">-- No open matches found --</option>
+                                            ) : (
+                                                <>
+                                                    <option value="">-- Choose Match --</option>
+                                                    {openMatches.map((m: any) => {
+                                                        const p1Id = m.match.player1_id?.toString();
+                                                        const p2Id = m.match.player2_id?.toString();
+                                                        const roster1 = allRosters.find(r => r.challonge_participant_id === p1Id);
+                                                        const roster2 = allRosters.find(r => r.challonge_participant_id === p2Id);
+                                                        
+                                                        const name1 = roster1 ? roster1.name : (challongeParticipantMap[p1Id] || `Participant ${p1Id || 'TBD'}`);
+                                                        const name2 = roster2 ? roster2.name : (challongeParticipantMap[p2Id] || `Participant ${p2Id || 'TBD'}`);
+                                                        
+                                                        const label = `${m.match.identifier}: ${name1} vs ${name2}`;
+                                                        return <option key={m.match.id} value={m.match.id}>{label}</option>;
+                                                    })}
+                                                </>
+                                            )}
+                                        </select>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2">Team A Roster</label>
+                                    <select value={selectedTeamA || ''} onChange={e => setSelectedTeamA(e.target.value)} className="w-full bg-[#050b14] border border-blue-500/30 rounded-xl p-4 font-bold outline-none text-blue-100 focus:border-blue-500 transition-colors">
+                                        {allRosters.map(r => <option key={r.id} value={r.id}>[{r.tag}] {r.name}</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-black text-purple-400 uppercase tracking-widest mb-2">Team B Roster</label>
+                                    <select value={selectedTeamB || ''} onChange={e => setSelectedTeamB(e.target.value)} className="w-full bg-[#050b14] border border-purple-500/30 rounded-xl p-4 font-bold outline-none text-purple-100 focus:border-purple-500 transition-colors">
+                                        {allRosters.map(r => <option key={r.id} value={r.id}>[{r.tag}] {r.name}</option>)}
+                                    </select>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -2106,10 +2329,24 @@ function AppContent() {
                      </div>
                  ))}
                  
+                 {foundLobby?.challonge_match_id && (
+                     <div className="bg-[#050b14]/80 p-5 rounded-2xl border border-red-500/30">
+                         <label className="block text-[10px] font-black text-red-500 mb-2 uppercase tracking-widest flex items-center gap-2"><Trophy size={12}/> Bracket Auto-Advance URL</label>
+                         <p className="text-[10px] text-slate-400 mb-3">This is an Official Match. Enter the Challonge Tournament ID to automatically report the winner.</p>
+                         <input 
+                             type="text"
+                             value={tournamentUrl}
+                             onChange={e => setTournamentUrl(e.target.value)}
+                             placeholder="e.g. cocelitetest1"
+                             className="w-full bg-black border border-white/5 focus:border-red-500/50 rounded-xl p-4 font-bold text-white outline-none transition-all shadow-inner"
+                         />
+                     </div>
+                 )}
+                 
                  <div className="flex gap-4 pt-4 border-t border-white/10">
                      <button type="button" onClick={() => setShowEndMatchModal(false)} className="flex-1 py-4 px-6 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shadow-lg active:scale-95">CANCEL</button>
                      <button type="button" onClick={submitEndMatch} disabled={modLoading} className="flex-1 py-4 px-6 bg-green-600 hover:bg-green-500 text-white rounded-xl font-black text-[10px] uppercase tracking-[0.2em] transition-all shadow-[0_0_20px_rgba(34,197,94,0.4)] hover:shadow-[0_0_30px_rgba(34,197,94,0.6)] active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2">
-                         {modLoading ? 'ARCHIVING...' : <><ChevronRight size={16}/> CONFIRM & ARCHIVE</>}
+                         {modLoading ? 'PROCESSING...' : <><ChevronRight size={16}/> CONFIRM & SUBMIT</>}
                      </button>
                  </div>
             </div>

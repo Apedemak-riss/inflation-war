@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Trophy } from 'lucide-react';
+import { CustomBracket } from './CustomBracket';
 
 export const TournamentHub: React.FC = () => {
     const navigate = useNavigate();
@@ -40,15 +41,9 @@ export const TournamentHub: React.FC = () => {
                 <div className="w-full h-[850px] rounded-2xl overflow-hidden border border-yellow-500/20 shadow-[0_0_50px_rgba(234,179,8,0.05)] relative group bg-[#0a101f] transition-all duration-500 hover:border-yellow-500/40 hover:shadow-[0_0_80px_rgba(234,179,8,0.1)]">
                     <div className="absolute inset-0 bg-gradient-to-b from-yellow-500/5 to-transparent pointer-events-none opacity-50"></div>
                     
-                    <iframe 
-                        src="https://challonge.com/cocelitetest1/module" 
-                        width="100%" 
-                        height="100%" 
-                        frameBorder="0" 
-                        scrolling="auto" 
-                        allow="fullscreen"
-                        className="relative z-10"
-                    />
+                    <div className="relative z-10 w-full h-full p-4">
+                        <CustomBracket tournamentUrl="cocelitetest1" />
+                    </div>
                 </div>
                 
                 <div className="mt-8 text-center bg-yellow-500/5 border border-yellow-500/20 py-3 px-6 rounded-full inline-flex items-center gap-2 animate-pulse-slow">
