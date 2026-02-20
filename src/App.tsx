@@ -9,7 +9,8 @@ import { UserSettings } from './components/UserSettings';
 import { MatchLogs } from './components/MatchLogs';
 import { TeamHub } from './components/TeamHub';
 
-import { Shield, Sword, Coins, ExternalLink, Hammer, Crown, Minus, Check, Users, RefreshCw, Trash2, Trophy, ArrowRightLeft, LogOut, Gavel, MonitorPlay, ClipboardCheck, AlertTriangle, Loader2, Edit2, Save, X, Tv, PawPrint, Castle, Terminal, Wifi, Lock, Zap, Skull, Hexagon, Crosshair, Settings } from 'lucide-react';
+import { Shield, Sword, Coins, ExternalLink, Hammer, Crown, Minus, Check, Users, RefreshCw, Trash2, Trophy, ArrowRightLeft, LogOut, Gavel, MonitorPlay, ClipboardCheck, AlertTriangle, Loader2, Edit2, Save, X, Tv, PawPrint, Castle, Terminal, Wifi, Lock, Zap, Skull, Hexagon, Crosshair, Settings, ArrowRight } from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
 
 // --- CONFIGURATION ---
 
@@ -242,6 +243,15 @@ function AppContent() {
   const [focusedPlayer, setFocusedPlayer] = useState<any>(null);
   const [petModalItem, setPetModalItem] = useState<Item | null>(null);
 
+  const [userRosterId, setUserRosterId] = useState<string | null>(null);
+
+  const [showOverseerModal, setShowOverseerModal] = useState(false);
+  const [matchType, setMatchType] = useState<'custom' | 'official'>('custom');
+  const [allRosters, setAllRosters] = useState<{id:string, name:string, tag:string}[]>([]);
+  const [activeLobbies, setActiveLobbies] = useState<any[]>([]);
+  const [selectedTeamA, setSelectedTeamA] = useState<string | null>(null);
+  const [selectedTeamB, setSelectedTeamB] = useState<string | null>(null);
+
   const [teamBudget, setTeamBudget] = useState(100);
   const [dbItems, setDbItems] = useState<Item[]>([]);
   const [teamPurchases, setTeamPurchases] = useState<any[]>([]);
@@ -269,6 +279,14 @@ function AppContent() {
 
   // --- INIT ---
   useEffect(() => { checkDatabase(); attemptRestoreSession(); }, []);
+
+  useEffect(() => {
+     if (user) {
+         supabase.from('roster_members').select('roster_id').eq('user_id', user.id).single().then(({data}) => {
+             if (data) setUserRosterId(data.roster_id);
+         });
+     }
+  }, [user]);
 
   const checkDatabase = async () => {
     const { data } = await supabase.from('items').select('*');
@@ -355,8 +373,52 @@ function AppContent() {
     }
   };
 
-  const handleModeratorAccess = async (retryCount = 0) => {
+  const openOverseerModal = async () => {
     const code = lobbyCode.trim().toUpperCase();
+    if (!code) return alert('Enter a Lobby ID first.');
+    if (!profile || profile.role !== 'moderator') {
+        return alert("ACCESS DENIED: Insufficient Security Clearance. Moderator privileges required.");
+    }
+    
+    setModLoading(true);
+    if (allRosters.length === 0) {
+        const { data, error } = await supabase.from('rosters').select('id, name, tag').order('name');
+        if (data) {
+            setAllRosters(data);
+            if (data.length >= 2) {
+                setSelectedTeamA(data[0].id);
+                setSelectedTeamB(data[1].id);
+            } else if (data.length === 1) {
+                setSelectedTeamA(data[0].id);
+                setSelectedTeamB(data[0].id);
+            }
+        } else if (error) {
+            console.error("Error fetching rosters:", error);
+            alert("Error loading tournament rosters.");
+        }
+    }
+    
+    // Fetch active lobbies for the Live Browser
+    const { data: lobbiesData, error: lobbiesError } = await supabase
+        .from('lobbies')
+        .select(`
+            *,
+            teams ( id, name, roster_id )
+        `)
+        .order('created_at', { ascending: false })
+        .limit(10);
+        
+    if (lobbiesData) {
+        setActiveLobbies(lobbiesData);
+    } else if (lobbiesError) {
+        console.error("Error fetching active lobbies:", lobbiesError);
+    }
+    setModLoading(false);
+    setShowOverseerModal(true);
+  };
+
+  const handleModeratorAccess = async (retryCount = 0, overrideCode?: string) => {
+    const code = (overrideCode || lobbyCode).trim().toUpperCase();
     if (!code) return alert('Enter a Lobby ID first.');
     
     if (!profile || profile.role !== 'moderator') {
@@ -385,25 +447,32 @@ function AppContent() {
       // 2. Create if not found
       if (!lobby) {
         console.log('[ModAccess] Lobby not found. Creating...');
-        const { data: nl, error: insertErr } = await withTimeout<any>(supabase.from('lobbies').insert({ code }).select().single());
+        
+        let nl, insertErr;
+        
+        const aId = matchType === 'official' ? selectedTeamA : null;
+        const bId = matchType === 'official' ? selectedTeamB : null;
+
+        const res = await supabase.rpc('create_lobby', {
+            p_lobby_name: code,
+            p_team_a_roster_id: aId,
+            p_team_b_roster_id: bId
+        });
+        
+        nl = res.data;
+        insertErr = res.error;
         
         if (insertErr) {
-          if (insertErr.code === '23505') {
+          if (insertErr.code === '23505' || insertErr.message?.includes('duplicate key')) {
             console.warn('[ModAccess] Conflict (23505). Fetching existing...');
-            // Unique constraint -> re-fetch
             const refetch = await withTimeout<any>(supabase.from('lobbies').select('*').eq('code', code).single());
             lobby = refetch.data;
           } else {
             throw insertErr;
           }
         } else {
-          console.log('[ModAccess] Lobby created. seeding teams...');
+          console.log('[ModAccess] Lobby created via RPC.');
           lobby = nl;
-          // Create default teams (we don't strictly need to await this for the view switch, but safer)
-          await withTimeout(supabase.from('teams').insert([
-            { lobby_id: nl.id, name: 'Team 1', budget: 100 },
-            { lobby_id: nl.id, name: 'Team 2', budget: 100 },
-          ]));
         }
       }
 
@@ -412,6 +481,7 @@ function AppContent() {
       console.log('[ModAccess] Success. Found lobby:', lobby);
       setFoundLobby(lobby);
       fetchTeams(lobby.id); // Fire and forget updater
+      setShowOverseerModal(false);
       navigate('/moderator');
       
     } catch (err: any) {
@@ -445,9 +515,25 @@ function AppContent() {
     if (!nameToUse) return alert("Enter name!");
     const team = lobbyTeams.find(t => t.name === tName);
     if (team?.players && team.players.length >= 3) return alert("Full!");
+    
+    setDeployLoading(true);
+
     const { data: tIdData } = await supabase.from('teams').select('id').eq('lobby_id', foundLobby.id).eq('name', tName).single();
-    const { data: p, error } = await supabase.from('players').insert({ team_id: tIdData!.id, name: nameToUse }).select().single();
-    if (error) return alert("Error joining.");
+    
+    // Call secure backend RPC
+    const { data: p, error } = await supabase.rpc('join_lobby_secure', {
+        p_team_id: tIdData!.id,
+        p_player_name: nameToUse
+    });
+
+    setDeployLoading(false);
+
+    if (error) {
+         if (error.message?.includes('Access Denied')) {
+             return alert(error.message);
+         }
+         return alert("Error joining: " + error.message);
+    }
     
     localStorage.setItem('iw_pid', p.id);
     localStorage.setItem('iw_tid', tIdData!.id);
@@ -1024,14 +1110,22 @@ function AppContent() {
                                   ))}
                               </div>
                               
-                              <button 
-                                onClick={() => handleJoinTeam(team.name)} 
-                                disabled={team.players?.length >= 3} 
-                                className={`w-full py-5 rounded-xl font-black uppercase tracking-widest transition-all duration-300 shadow-xl flex items-center justify-center gap-2 ${team.players?.length >= 3 ? 'bg-slate-800 text-slate-600 cursor-not-allowed border border-white/5' : 'bg-white text-black hover:bg-blue-50 hover:scale-[1.02] hover:shadow-white/20'}`}
-                              >
-                                  {team.players?.length >= 3 ? <Lock size={16}/> : <Zap size={18} className={idx===0?'text-blue-600':'text-purple-600'} />}
-                                  {team.players?.length >= 3 ? 'UNIT FULL' : 'INITIATE LINK'}
-                              </button>
+                              {(() => {
+                                  const isLocked = team.roster_id && team.roster_id !== userRosterId;
+                                  const isMyTeam = team.roster_id && team.roster_id === userRosterId;
+                                  const isFull = team.players?.length >= 3;
+                                  
+                                  return (
+                                      <button 
+                                        onClick={() => handleJoinTeam(team.name)} 
+                                        disabled={isFull || isLocked || deployLoading} 
+                                        className={`w-full py-5 rounded-xl font-black uppercase tracking-widest transition-all duration-300 shadow-xl flex items-center justify-center gap-2 ${isFull ? 'bg-slate-800 text-slate-600 cursor-not-allowed border border-white/5' : isLocked ? 'bg-red-950/40 text-red-500/50 cursor-not-allowed border border-red-500/20 hover:border-red-500/50 hover:bg-red-900/30 text-red-400' : isMyTeam ? 'bg-blue-600 text-white hover:bg-blue-500 hover:scale-[1.02] shadow-[0_0_20px_rgba(37,99,235,0.4)]' : 'bg-white text-black hover:bg-blue-50 hover:scale-[1.02] hover:shadow-white/20'}`}
+                                      >
+                                          {deployLoading ? <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> : isFull ? <Lock size={16}/> : isLocked ? <Lock size={16} className="text-red-500 mb-0.5"/> : <Zap size={18} className={isMyTeam ? 'text-white' : (idx===0?'text-blue-600':'text-purple-600')} />}
+                                          {deployLoading ? 'VERIFYING...' : isFull ? 'UNIT FULL' : isLocked ? 'RESTRICTED' : isMyTeam ? 'JOIN YOUR TEAM' : 'INITIATE LINK'}
+                                      </button>
+                                  );
+                              })()}
                           </div>
                       </div>
                   ))}
@@ -1045,14 +1139,15 @@ function AppContent() {
 
   // --- ROUTER & VIEWS ---
   return (
-    <Routes>
-      <Route path="/" element={
-        isRestoring ? (
-           <div className="min-h-screen bg-[#050b14] flex items-center justify-center"><div className="relative"><div className="absolute inset-0 bg-blue-500 blur-xl opacity-20 animate-pulse"></div><Loader2 className="w-12 h-12 animate-spin text-blue-500 relative z-10"/></div></div>
-        ) : (
-          <>
-        <ProfileBadge />
-        <div className="min-h-screen flex items-center justify-center p-4 pt-24 md:p-4 relative overflow-x-hidden bg-[#050b14]">
+    <>
+      <Routes>
+        <Route path="/" element={
+          isRestoring ? (
+             <div className="min-h-screen bg-[#050b14] flex items-center justify-center"><div className="relative"><div className="absolute inset-0 bg-blue-500 blur-xl opacity-20 animate-pulse"></div><Loader2 className="w-12 h-12 animate-spin text-blue-500 relative z-10"/></div></div>
+          ) : (
+            <>
+          <ProfileBadge />
+          <div className="min-h-screen flex items-center justify-center p-4 pt-24 md:p-4 relative overflow-x-hidden bg-[#050b14]">
           {/* Animated Background Elements */}
           <div className="absolute inset-0 overflow-hidden pointer-events-none">
               <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-600/10 rounded-full blur-[100px] animate-pulse-slow"></div>
@@ -1107,7 +1202,7 @@ function AppContent() {
                               {deployLoading ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> VERIFYING...</> : <><Zap size={14} /> DEPLOY</>}
                           </span>
                       </button>
-                      <button type="button" onClick={() => handleModeratorAccess()} disabled={modLoading || !lobbyCode.trim()} className={`group/btn relative overflow-hidden font-black py-4 rounded-xl border transition-all duration-300 shadow-[0_0_20px_rgba(239,68,68,0.1)] flex items-center justify-center ${modLoading ? 'bg-red-900/20 text-red-400 border-red-500/30 cursor-wait' : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20 hover:border-red-500/50 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100'}`}>
+                      <button type="button" onClick={() => openOverseerModal()} disabled={modLoading || !lobbyCode.trim()} className={`group/btn relative overflow-hidden font-black py-4 rounded-xl border transition-all duration-300 shadow-[0_0_20px_rgba(239,68,68,0.1)] flex items-center justify-center ${modLoading ? 'bg-red-900/20 text-red-400 border-red-500/30 cursor-wait' : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20 hover:border-red-500/50 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100'}`}>
                           <div className="absolute inset-0 bg-gradient-to-r from-red-600/0 via-red-600/10 to-red-600/0 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-700"></div>
                           <span className="relative z-10 tracking-widest text-xs flex items-center justify-center gap-2">
                               {modLoading ? <><div className="w-3 h-3 border-2 border-red-400 border-t-transparent rounded-full animate-spin" /> VERIFYING...</> : <><Crown size={14} /> OVERSEER</>}
@@ -1836,6 +1931,100 @@ function AppContent() {
   <Route path="/team" element={<TeamHub />} />
   <Route path="*" element={<Navigate to="/" replace />} />
 </Routes>
+
+{showOverseerModal && (
+    <div className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-4 backdrop-blur-xl animate-fade-in" onClick={() => setShowOverseerModal(false)}>
+        <div className="glass border border-white/10 rounded-[2.5rem] p-10 w-full max-w-2xl shadow-2xl animate-slide-up relative overflow-hidden bg-[#0a101f]" onClick={e => e.stopPropagation()}>
+            <div className="absolute top-0 right-0 w-64 h-64 bg-red-500/10 rounded-full blur-[100px] pointer-events-none"></div>
+            <h3 className="text-4xl font-black mb-8 tracking-tighter text-center flex items-center justify-center gap-4 text-red-500 drop-shadow-sm">
+                <Crown size={32}/> OVERSEER SETUP
+            </h3>
+            
+            <div className="space-y-6 relative z-10">
+                <div className="flex gap-4 p-2 bg-black/40 rounded-2xl border border-white/5">
+                    <button onClick={() => setMatchType('custom')} className={`flex-1 py-4 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${matchType === 'custom' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}>CUSTOM GAME</button>
+                    <button onClick={() => setMatchType('official')} className={`flex-1 py-4 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${matchType === 'official' ? 'bg-red-600 text-white shadow-lg' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}>OFFICIAL MATCH</button>
+                </div>
+                
+                {matchType === 'official' && (
+                    <div className="space-y-4 animate-fade-in">
+                        <div className="p-6 bg-black/40 rounded-2xl border border-white/5 space-y-4">
+                            <div>
+                                <label className="block text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2">Team A Roster</label>
+                                <select value={selectedTeamA || ''} onChange={e => setSelectedTeamA(e.target.value)} className="w-full bg-[#050b14] border border-blue-500/30 rounded-xl p-4 font-bold outline-none text-blue-100 focus:border-blue-500 transition-colors">
+                                    {allRosters.map(r => <option key={r.id} value={r.id}>[{r.tag}] {r.name}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-black text-purple-400 uppercase tracking-widest mb-2">Team B Roster</label>
+                                <select value={selectedTeamB || ''} onChange={e => setSelectedTeamB(e.target.value)} className="w-full bg-[#050b14] border border-purple-500/30 rounded-xl p-4 font-bold outline-none text-purple-100 focus:border-purple-500 transition-colors">
+                                    {allRosters.map(r => <option key={r.id} value={r.id}>[{r.tag}] {r.name}</option>)}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                )}
+                
+                <div className="flex gap-4 pt-4">
+                    <button type="button" onClick={() => setShowOverseerModal(false)} className="flex-1 py-4 px-6 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shadow-lg active:scale-95">CANCEL</button>
+                    <button type="button" onClick={() => handleModeratorAccess()} disabled={modLoading} className="flex-1 py-4 px-6 bg-red-600 hover:bg-red-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shadow-[0_0_20px_rgba(239,68,68,0.4)] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+                        {modLoading ? 'DEPLOYING...' : 'DEPLOY MATCH'}
+                    </button>
+                </div>
+                
+                {/* LIVE LOBBY BROWSER */}
+                <div className="pt-8 mt-8 border-t border-white/10 relative">
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-[#0a101f] px-4 text-[10px] font-black tracking-[0.2em] text-blue-400 uppercase flex items-center gap-2">
+                        <Wifi size={12} className="animate-pulse" /> ONGOING MATCHES
+                    </div>
+                    
+                    <div className="space-y-3 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                        {activeLobbies.length === 0 ? (
+                            <div className="text-center py-8 text-slate-500 text-xs font-bold uppercase tracking-widest">No active links found.</div>
+                        ) : (
+                            activeLobbies.map(lobby => (
+                                <div key={lobby.id} className="bg-black/40 border border-white/5 rounded-xl p-4 flex items-center justify-between hover:bg-white/5 transition-colors group">
+                                    <div className="flex flex-col">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-white font-black text-lg tracking-tight">{lobby.code}</span>
+                                            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest bg-white/5 py-0.5 px-2 rounded-full">
+                                                {formatDistanceToNow(new Date(lobby.created_at), { addSuffix: true })}
+                                            </span>
+                                        </div>
+                                        <div className="text-xs font-bold text-slate-400 mt-1 flex items-center gap-2">
+                                            {lobby.teams?.[0] ? (
+                                                <span className={lobby.teams[0].roster_id ? "text-blue-400" : ""}>
+                                                    {lobby.teams[0].roster_id ? allRosters.find(r => r.id === lobby.teams[0].roster_id)?.name || lobby.teams[0].name : lobby.teams[0].name}
+                                                </span>
+                                            ) : 'Unknown'}
+                                            <span className="text-slate-600 text-[10px]">VS</span>
+                                            {lobby.teams?.[1] ? (
+                                                <span className={lobby.teams[1].roster_id ? "text-purple-400" : ""}>
+                                                    {lobby.teams[1].roster_id ? allRosters.find(r => r.id === lobby.teams[1].roster_id)?.name || lobby.teams[1].name : lobby.teams[1].name}
+                                                </span>
+                                            ) : 'Unknown'}
+                                        </div>
+                                    </div>
+                                    <button 
+                                        onClick={() => {
+                                            setLobbyCode(lobby.code);
+                                            setShowOverseerModal(false);
+                                            handleModeratorAccess(0, lobby.code);
+                                        }}
+                                        className="py-2 px-4 bg-blue-500/10 hover:bg-blue-500 text-blue-400 hover:text-white border border-blue-500/30 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 flex items-center gap-2"
+                                    >
+                                        JOIN <ArrowRight size={12} />
+                                    </button>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+)}
+</>
   );
 }
 
