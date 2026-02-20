@@ -1,6 +1,8 @@
+import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { LogOut, Settings } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
 
 function getAvatarUrl(seed: string) {
   return `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(seed)}`;
@@ -9,6 +11,26 @@ function getAvatarUrl(seed: string) {
 export function ProfileBadge() {
   const { user, profile, signOut } = useAuth();
   const navigate = useNavigate();
+  const [teamTag, setTeamTag] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (user) {
+      fetchTeamTag();
+    }
+  }, [user]);
+
+  const fetchTeamTag = async () => {
+    const { data } = await supabase
+      .from('roster_members')
+      .select('rosters(tag)')
+      .eq('user_id', user?.id)
+      .maybeSingle();
+    
+    if (data?.rosters) {
+        // @ts-ignore
+        setTeamTag(data.rosters.tag);
+    }
+  };
 
   // Only render for authenticated users with a loaded profile
   if (!user || !profile) return null;
@@ -35,7 +57,8 @@ export function ProfileBadge() {
 
         {/* Info */}
         <div className="flex flex-col">
-          <span className="text-white text-sm font-black tracking-wide leading-none">
+          <span className="text-white text-sm font-black tracking-wide leading-none truncate max-w-[150px]">
+            {teamTag && <span className="text-emerald-500 mr-1">[{teamTag}]</span>}
             {displayName}
           </span>
           <div className="flex items-center gap-1.5 mt-1.5">

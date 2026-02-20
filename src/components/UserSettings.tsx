@@ -68,6 +68,14 @@ export function UserSettings() {
       setCallsignError(error.code === '23505' ? 'Callsign already taken. Try another.' : error.message);
       setCallsignStatus('error');
     } else {
+      // Sync to Roster Members (Fire and forget to not block UI)
+      supabase.from('roster_members')
+        .update({ player_name: trimmed })
+        .eq('user_id', profile!.id)
+        .then(({ error }) => {
+            if (error) console.error("Failed to sync callsign to roster:", error);
+        });
+
       await refreshProfile();
       setCallsignStatus('success');
       setTimeout(() => setCallsignStatus('idle'), 3000);

@@ -7,6 +7,7 @@ import { CallsignModal } from './components/CallsignModal';
 import { ProfileBadge } from './components/ProfileBadge';
 import { UserSettings } from './components/UserSettings';
 import { MatchLogs } from './components/MatchLogs';
+import { TeamHub } from './components/TeamHub';
 
 import { Shield, Sword, Coins, ExternalLink, Hammer, Crown, Minus, Check, Users, RefreshCw, Trash2, Trophy, ArrowRightLeft, LogOut, Gavel, MonitorPlay, ClipboardCheck, AlertTriangle, Loader2, Edit2, Save, X, Tv, PawPrint, Castle, Terminal, Wifi, Lock, Zap, Skull, Hexagon, Crosshair, Settings } from 'lucide-react';
 
@@ -1125,17 +1126,32 @@ function AppContent() {
                       </button>
 
                       {/* Match Archive Button */}
-                      <button 
-                        type="button"
-                        onClick={() => navigate('/logs')}
-                        className="col-span-2 group/btn relative overflow-hidden font-black py-4 rounded-xl border border-white/5 bg-slate-800/40 hover:bg-slate-700/50 hover:border-white/20 transition-all duration-300 shadow-lg flex items-center justify-center text-slate-400 hover:text-white"
-                      >
-                         <div className="absolute inset-0 bg-gradient-to-r from-blue-500/0 via-purple-500/10 to-blue-500/0 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-1000"></div>
-                         <span className="relative z-10 tracking-widest text-xs flex items-center justify-center gap-3">
-                            <div className="w-1.5 h-1.5 bg-purple-500 rounded-full group-hover/btn:animate-ping"/>
-                            MATCH ARCHIVE
-                         </span>
-                      </button>
+                      {/* Main Menu Actions */}
+                      <div className="col-span-2 grid grid-cols-2 gap-4">
+                        <button 
+                            type="button"
+                            onClick={() => navigate('/team')}
+                            className="group/btn relative overflow-hidden font-black py-4 rounded-xl border border-emerald-500/20 bg-[#0a101f]/80 hover:bg-emerald-500/10 transition-all duration-300 shadow-lg flex items-center justify-center text-emerald-400 hover:scale-[1.02] active:scale-95"
+                        >
+                            <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/0 via-emerald-500/10 to-emerald-500/0 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-1000"></div>
+                            <span className="relative z-10 tracking-widest text-xs flex items-center justify-center gap-2">
+                                <Users size={16} className="group-hover/btn:drop-shadow-[0_0_8px_rgba(52,211,153,0.5)]"/>
+                                MY TEAM
+                            </span>
+                        </button>
+
+                        <button 
+                            type="button"
+                            onClick={() => navigate('/logs')}
+                            className="group/btn relative overflow-hidden font-black py-4 rounded-xl border border-purple-500/20 bg-[#0a101f]/80 hover:bg-purple-500/10 transition-all duration-300 shadow-lg flex items-center justify-center text-purple-400 hover:scale-[1.02] active:scale-95"
+                        >
+                           <div className="absolute inset-0 bg-gradient-to-r from-purple-500/0 via-purple-500/10 to-purple-500/0 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-1000"></div>
+                           <span className="relative z-10 tracking-widest text-xs flex items-center justify-center gap-2">
+                              <Trophy size={16} className="group-hover/btn:drop-shadow-[0_0_8px_rgba(168,85,247,0.5)]"/>
+                              ARCHIVE
+                           </span>
+                        </button>
+                      </div>
                     </div>
                 </form>
             </div>
@@ -1816,6 +1832,8 @@ function AppContent() {
       </div>
     </div>
   </>} />
+  <Route path="/logs" element={<MatchLogs />} />
+  <Route path="/team" element={<TeamHub />} />
   <Route path="*" element={<Navigate to="/" replace />} />
 </Routes>
   );
