@@ -8,8 +8,9 @@ import { ProfileBadge } from './components/ProfileBadge';
 import { UserSettings } from './components/UserSettings';
 import { MatchLogs } from './components/MatchLogs';
 import { TeamHub } from './components/TeamHub';
+import { TournamentHub } from './components/TournamentHub';
 
-import { Shield, Sword, Coins, ExternalLink, Hammer, Crown, Minus, Check, Users, RefreshCw, Trash2, Trophy, ArrowRightLeft, LogOut, Gavel, MonitorPlay, ClipboardCheck, AlertTriangle, Loader2, Edit2, Save, X, Tv, PawPrint, Castle, Terminal, Wifi, Lock, Zap, Skull, Hexagon, Crosshair, Settings, ArrowRight } from 'lucide-react';
+import { Shield, Sword, Coins, ExternalLink, Hammer, Crown, Minus, Check, Users, RefreshCw, Trash2, Trophy, ArrowRightLeft, LogOut, Gavel, MonitorPlay, ClipboardCheck, AlertTriangle, Loader2, Edit2, Save, X, Tv, PawPrint, Castle, Terminal, Wifi, Lock, Zap, Skull, Hexagon, Crosshair, Settings, ArrowRight, ChevronRight } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
 // --- CONFIGURATION ---
@@ -266,6 +267,10 @@ function AppContent() {
   const [refLinks, setRefLinks] = useState(['', '', '']);
   const [refResult, setRefResult] = useState<number | null>(null);
   const [refBreakdown, setRefBreakdown] = useState<any[]>([]);
+
+  // End Match Tracking
+  const [showEndMatchModal, setShowEndMatchModal] = useState(false);
+  const [endMatchScores, setEndMatchScores] = useState<Record<string, { stars: string, percentage: string }>>({});
 
   const [showSandbox, setShowSandbox] = useState(false);
   const [poppingItem, setPoppingItem] = useState<string | null>(null);
@@ -805,18 +810,18 @@ function AppContent() {
     return (
         <div className={isLarge ? "space-y-4" : "space-y-1"}>
             <div className="flex flex-wrap gap-2 mb-3">
-                {['BK', 'AQ', 'GW', 'RC', 'MP'].filter(h => active.some(i => !i.is_cc && (i.hero === h || i.equipped_hero === h))).map(h => (
+                {['BK', 'AQ', 'GW', 'RC', 'MP'].filter(h => active.some((i: any) => !i.is_cc && (i.hero === h || i.equipped_hero === h))).map(h => (
                     <div key={h} className="group relative bg-white/5 p-1 rounded-lg border border-white/5 hover:border-yellow-500/30 flex items-center gap-1 transition-all">
                         <div className="relative">
                              <img src={`/${h.toLowerCase()}.png`} className="w-8 h-8 rounded-md border border-white/10 object-cover shadow-sm group-hover:grayscale-0 grayscale-[0.3] transition-all"/>
                              <div className="absolute -bottom-1 -right-1 bg-black/60 text-[8px] font-bold px-1 rounded text-white border border-white/10">{h}</div>
                         </div>
-                        {active.filter(i => !i.is_cc && i.type === 'pet' && i.equipped_hero === h).map(pet => (
+                        {active.filter((i: any) => !i.is_cc && i.type === 'pet' && i.equipped_hero === h).map((pet: any) => (
                             <div key={pet.id} className="relative w-6 h-6 border border-green-500/30 rounded bg-green-900/10 p-0.5" title={pet.name}>
                                  <img src={getImageUrl(pet.name, 'pet')} className="w-full h-full object-contain"/>
                             </div>
                         ))}
-                        {active.filter(i => !i.is_cc && i.hero === h).map(eq => (
+                        {active.filter((i: any) => !i.is_cc && i.hero === h).map((eq: any) => (
                             <div key={eq.id} className="relative w-6 h-6 border border-blue-500/30 rounded bg-blue-900/10 p-0.5" title={eq.name}>
                                 <img src={getImageUrl(eq.name, 'equipment', h)} className="w-full h-full object-contain"/>
                             </div>
@@ -824,16 +829,16 @@ function AppContent() {
                     </div>
                 ))}
             </div>
-            {renderRow(active.filter(i => !i.is_cc && (i.type === 'troop' || i.type === 'super_troop')), counts, "UNIT", "blue")}
-            {renderRow(active.filter(i => !i.is_cc && i.type === 'siege'), counts, "MECH", "orange")}
-            {renderRow(active.filter(i => !i.is_cc && i.type === 'spell'), counts, "META", "purple")}
+            {renderRow(active.filter((i: any) => !i.is_cc && (i.type === 'troop' || i.type === 'super_troop')), counts, "UNIT", "blue")}
+            {renderRow(active.filter((i: any) => !i.is_cc && i.type === 'siege'), counts, "MECH", "orange")}
+            {renderRow(active.filter((i: any) => !i.is_cc && i.type === 'spell'), counts, "META", "purple")}
             
             {(Object.keys(ccCounts).length > 0) && (
                 <div className="border-t border-dashed border-white/5 pt-2 mt-2 bg-orange-500/5 rounded-lg p-2 relative overflow-hidden">
                     <div className="absolute top-0 right-0 p-1 opacity-20"><Castle size={12} className="text-orange-500"/></div>
-                    {renderRow(active.filter(i => i.is_cc && i.type === 'siege'), ccCounts, "CC-M", "red")}
-                    {renderRow(active.filter(i => i.is_cc && (i.type === 'troop' || i.type === 'super_troop')), ccCounts, "CC-U", "red")}
-                    {renderRow(active.filter(i => i.is_cc && i.type === 'spell'), ccCounts, "CC-S", "red")}
+                    {renderRow(active.filter((i: any) => i.is_cc && i.type === 'siege'), ccCounts, "CC-M", "red")}
+                    {renderRow(active.filter((i: any) => i.is_cc && (i.type === 'troop' || i.type === 'super_troop')), ccCounts, "CC-U", "red")}
+                    {renderRow(active.filter((i: any) => i.is_cc && i.type === 'spell'), ccCounts, "CC-S", "red")}
                 </div>
             )}
         </div>
@@ -852,23 +857,32 @@ function AppContent() {
 
   const handleRenameTeam = async (tId: string) => { if(!tempTeamName.trim()) return; await supabase.rpc('moderator_rename_team', { p_team_id: tId, p_new_name: tempTeamName }); setEditingTeamId(null); fetchTeams(foundLobby.id); };
   
-  const handleEndMatch = async () => {
-      const teamScores: Record<string, string> = {};
-      
-      // Prompt for each team's score
+  const handleEndMatchClick = () => {
+      // Initialize scores for the modal
+      const initialScores: Record<string, { stars: string, percentage: string }> = {};
+      lobbyTeams.forEach(t => {
+          initialScores[t.id] = { stars: '', percentage: '' };
+      });
+      setEndMatchScores(initialScores);
+      setShowEndMatchModal(true);
+  };
+
+  const submitEndMatch = async () => {
+      // Validate inputs
       for (const team of lobbyTeams) {
-          const score = prompt(`ENTER SCORE FOR ${team.name}:`);
-          if (score === null) return; // User cancelled
-          teamScores[team.id] = score;
+          const score = endMatchScores[team.id];
+          if (!score || score.stars === '' || score.percentage === '') {
+              alert(`Please enter both Stars and Destruction % for ${team.name}`);
+              return;
+          }
       }
 
-      if (!confirm(`CONFIRM END MATCH?\n\nThis will ARCHIVE the match with the entered scores and DELETE the lobby.\n\nType 'CONFIRM' to proceed.`)) return;
-      
       setModLoading(true);
       try {
-          const { error } = await supabase.rpc('end_match_secure', { p_lobby_id: foundLobby.id, p_team_scores: teamScores });
+          const { error } = await supabase.rpc('end_match_secure', { p_lobby_id: foundLobby.id, p_team_scores: endMatchScores });
           if (error) throw error;
           alert("Match Archived & Lobby Cleared.");
+          setShowEndMatchModal(false);
           setFoundLobby(null); setLobbyCode(''); navigate('/');
       } catch (err: any) {
           alert("Error: " + err.message);
@@ -1147,156 +1161,177 @@ function AppContent() {
           ) : (
             <>
           <ProfileBadge />
-          <div className="min-h-screen flex items-center justify-center p-4 pt-24 md:p-4 relative overflow-x-hidden bg-[#050b14]">
+          <div className="min-h-screen flex flex-col justify-between py-8 px-4 relative overflow-x-hidden bg-[#050b14]">
           {/* Animated Background Elements */}
-          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
               <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-600/10 rounded-full blur-[100px] animate-pulse-slow"></div>
               <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-600/10 rounded-full blur-[100px] animate-pulse-slow" style={{animationDelay: '1s'}}></div>
               <div className="absolute top-[20%] right-[20%] w-[20%] h-[20%] bg-yellow-500/5 rounded-full blur-[80px] animate-pulse-slow" style={{animationDelay: '2s'}}></div>
               <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150 mix-blend-overlay"></div>
           </div>
           
-
-          
-          <div className="max-w-md w-full relative z-10 animate-slide-up group">
-            <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 via-purple-600 to-yellow-600 rounded-[2rem] opacity-30 blur-lg group-hover:opacity-60 transition duration-1000"></div>
-            <div className="glass p-1 p-6 lg:p-10 rounded-[2rem] text-center relative shadow-2xl border border-white/10 bg-black/40 backdrop-blur-xl will-change-transform">
-                <div className="absolute -top-16 left-1/2 -translate-x-1/2">
-                    <div className="relative w-24 h-24 lg:w-32 lg:h-32 flex items-center justify-center">
-                        <div className="absolute inset-0 bg-blue-500 blur-[60px] opacity-40 rounded-full animate-pulse-slow"></div>
-                        <div className="relative z-10 bg-[#0a101f] p-3 lg:p-4 rounded-2xl border border-white/10 shadow-[0_0_40px_rgba(59,130,246,0.2)] ring-1 ring-white/20">
-                            <Shield className="w-12 h-12 lg:w-16 lg:h-16 text-blue-400 drop-shadow-[0_0_15px_rgba(59,130,246,0.6)]" strokeWidth={1.5} />
-                        </div>
+          {/* 1. Header (Centered, Top) */}
+          <div className="relative z-10 flex flex-col items-center justify-center animate-slide-down pt-4 md:pt-8 w-full">
+                <div className="relative w-20 h-20 lg:w-28 lg:h-28 flex items-center justify-center mb-6">
+                    <div className="absolute inset-0 bg-blue-500 blur-[60px] opacity-40 rounded-full animate-pulse-slow"></div>
+                    <div className="relative z-10 bg-[#0a101f] p-3 lg:p-4 rounded-2xl border border-white/10 shadow-[0_0_40px_rgba(59,130,246,0.2)] ring-1 ring-white/20">
+                        <Shield className="w-10 h-10 lg:w-14 lg:h-14 text-blue-400 drop-shadow-[0_0_15px_rgba(59,130,246,0.6)]" strokeWidth={1.5} />
                     </div>
                 </div>
                 
-                <h1 className="text-4xl lg:text-6xl font-black mb-2 mt-8 lg:mt-12 tracking-tighter text-white drop-shadow-2xl">
+                <h1 className="text-4xl lg:text-6xl font-black mb-2 tracking-tighter text-white drop-shadow-2xl text-center">
                     INFLATION<br/>
                     <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 text-glow">WAR</span>
                 </h1>
-                <p className="text-blue-200/60 font-medium tracking-[0.4em] text-[10px] mb-12 uppercase border-y border-white/5 py-3">Tactical Economy Simulator</p>
-                
-                <form onSubmit={(e) => handleFindLobby(e, '/join/' + lobbyCode)} className="space-y-6 relative">
-                    <div className="relative group/input">
-                        <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500 to-purple-500 rounded-xl opacity-0 group-hover/input:opacity-50 transition duration-500 blur"></div>
-                        <div className="relative flex items-center bg-[#050b14] border border-white/10 rounded-xl overflow-hidden shadow-inner">
-                            <div className="pl-4 text-slate-500"><Terminal size={20} /></div>
-                            <input 
-                                value={lobbyCode} 
-                                onChange={e => setLobbyCode(e.target.value)} 
-                                className="w-full bg-transparent p-3 lg:p-5 text-center text-xl lg:text-3xl font-black font-mono uppercase tracking-[0.2em] outline-none text-white placeholder:text-slate-800 transition-all focus:placeholder:text-slate-700" 
-                                placeholder="LOBBY ID" 
-                                autoFocus
-                            />
-                        </div>
-                    </div>
-                    {/* Dual Action Buttons */}
-                    <div className="grid grid-cols-2 gap-3">
-                      <button 
-                        type="submit" 
-                        disabled={deployLoading || !lobbyCode.trim()}
-                        className={`col-span-2 group/btn relative overflow-hidden font-black py-4 rounded-xl shadow-[0_0_20px_rgba(255,255,255,0.1)] transition-all duration-300 flex items-center justify-center ${deployLoading ? 'bg-gray-800 text-white/60 cursor-wait' : 'bg-white text-black hover:shadow-[0_0_40px_rgba(255,255,255,0.2)] hover:scale-[1.02] active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:shadow-none'}`}
-                      >
-                          <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-purple-600 opacity-0 group-hover/btn:opacity-10 transition-opacity"></div>
-                          <span className="relative z-10 tracking-widest text-xs flex items-center justify-center gap-2">
-                              {deployLoading ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> VERIFYING...</> : <><Zap size={14} /> DEPLOY</>}
-                          </span>
-                      </button>
-                      <button type="button" onClick={() => openOverseerModal()} disabled={modLoading || !lobbyCode.trim()} className={`group/btn relative overflow-hidden font-black py-4 rounded-xl border transition-all duration-300 shadow-[0_0_20px_rgba(239,68,68,0.1)] flex items-center justify-center ${modLoading ? 'bg-red-900/20 text-red-400 border-red-500/30 cursor-wait' : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20 hover:border-red-500/50 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100'}`}>
-                          <div className="absolute inset-0 bg-gradient-to-r from-red-600/0 via-red-600/10 to-red-600/0 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-700"></div>
-                          <span className="relative z-10 tracking-widest text-xs flex items-center justify-center gap-2">
-                              {modLoading ? <><div className="w-3 h-3 border-2 border-red-400 border-t-transparent rounded-full animate-spin" /> VERIFYING...</> : <><Crown size={14} /> OVERSEER</>}
-                          </span>
-                      </button>
-                      <button 
-                        type="button" 
-                        onClick={() => handleFindLobby('streamer')} 
-                        disabled={streamerLoading || !lobbyCode.trim()}
-                        className={`group/btn relative overflow-hidden font-black py-4 rounded-xl border transition-all duration-300 shadow-[0_0_20px_rgba(168,85,247,0.1)] flex items-center justify-center ${streamerLoading ? 'bg-purple-900/20 text-purple-400 border-purple-500/30 cursor-wait' : 'bg-purple-500/10 text-purple-400 border-purple-500/30 hover:bg-purple-500/20 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:bg-purple-500/10'}`}
-                      >
-                          <div className="absolute inset-0 bg-gradient-to-r from-purple-600/0 via-purple-600/10 to-purple-600/0 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-700"></div>
-                          <span className="relative z-10 tracking-widest text-xs flex items-center justify-center gap-2">
-                              {streamerLoading ? <><div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" /> VERIFYING...</> : <><MonitorPlay size={14} /> STREAMER</>}
-                          </span>
-                      </button>
-
-                      {/* Match Archive Button */}
-                      {/* Main Menu Actions */}
-                      <div className="col-span-2 grid grid-cols-2 gap-4">
-                        <button 
-                            type="button"
-                            onClick={() => navigate('/team')}
-                            className="group/btn relative overflow-hidden font-black py-4 rounded-xl border border-emerald-500/20 bg-[#0a101f]/80 hover:bg-emerald-500/10 transition-all duration-300 shadow-lg flex items-center justify-center text-emerald-400 hover:scale-[1.02] active:scale-95"
-                        >
-                            <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/0 via-emerald-500/10 to-emerald-500/0 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-1000"></div>
-                            <span className="relative z-10 tracking-widest text-xs flex items-center justify-center gap-2">
-                                <Users size={16} className="group-hover/btn:drop-shadow-[0_0_8px_rgba(52,211,153,0.5)]"/>
-                                MY TEAM
-                            </span>
-                        </button>
-
-                        <button 
-                            type="button"
-                            onClick={() => navigate('/logs')}
-                            className="group/btn relative overflow-hidden font-black py-4 rounded-xl border border-purple-500/20 bg-[#0a101f]/80 hover:bg-purple-500/10 transition-all duration-300 shadow-lg flex items-center justify-center text-purple-400 hover:scale-[1.02] active:scale-95"
-                        >
-                           <div className="absolute inset-0 bg-gradient-to-r from-purple-500/0 via-purple-500/10 to-purple-500/0 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-1000"></div>
-                           <span className="relative z-10 tracking-widest text-xs flex items-center justify-center gap-2">
-                              <Trophy size={16} className="group-hover/btn:drop-shadow-[0_0_8px_rgba(168,85,247,0.5)]"/>
-                              ARCHIVE
-                           </span>
-                        </button>
-                      </div>
-                    </div>
-                </form>
-            </div>
-
-
-            
-            {/* Referee Access (Moderator Only) */}
-            {profile?.role === 'moderator' && (
-                <div className="mt-8 flex justify-center animate-fade-in relative z-20">
-                    <button 
-                      onClick={() => navigate('/referee')}
-                      className="bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/30 px-6 py-3 rounded-xl text-xs font-black tracking-widest hover:scale-105 active:scale-95 transition-all flex items-center gap-2 shadow-[0_0_15px_rgba(239,68,68,0.2)]"
-                    >
-                      <Gavel size={14} /> REFEREE TOOLS
-                    </button>
-                </div>
-            )}
-            
-             <div className="mt-16 flex flex-col items-center gap-6 opacity-60 hover:opacity-100 transition-opacity duration-500 pb-8">
-                  <div className="h-px w-32 bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
-                  
-                  <div className="flex flex-col md:flex-row items-center gap-4 md:gap-6 p-4 rounded-2xl border border-white/5 bg-black/20 backdrop-blur-sm">
-                      <div className="flex items-center gap-4">
-                          <img src="/Logo.png" alt="Logo" className="w-12 h-12 object-contain drop-shadow-lg" />
-                          <span className="text-sm font-black tracking-[0.15em] uppercase text-slate-300 text-shadow">
-                              CLASH OF CLANS ELITE NETWORK
-                          </span>
-                      </div>
+                <p className="text-blue-200/60 font-medium tracking-[0.4em] text-[10px] uppercase border-y border-white/5 py-2 px-8">Tactical Economy Simulator</p>
+          </div>
+          
+          {/* 2. Body (Two Columns, Middle) */}
+          <div className="w-full max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 flex-grow place-items-center mt-8 mb-8 relative z-10">
+              
+              {/* Left Column (Matchmaking) */}
+              <div className="w-full max-w-md relative group animate-slide-up">
+                  <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 via-purple-600 to-yellow-600 rounded-[2rem] opacity-30 blur-lg group-hover:opacity-60 transition duration-1000"></div>
+                  <div className="glass p-6 lg:p-10 rounded-[2rem] text-center relative shadow-2xl border border-white/10 bg-black/40 backdrop-blur-xl">
                       
-                      <div className="hidden md:block w-px h-8 bg-white/10"></div>
-                      
-                      <a 
-                          href="https://t.me/CoCEliteNetwork" 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all hover:scale-105 active:scale-95 shadow-lg shadow-blue-500/20 hover:shadow-blue-500/40"
-                      >
-                          VISIT CHANNEL <ExternalLink size={12} />
-                      </a>
+                      <form onSubmit={(e) => handleFindLobby(e, '/join/' + lobbyCode)} className="space-y-6 relative">
+                          <div className="relative group/input">
+                              <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500 to-purple-500 rounded-xl opacity-0 group-hover/input:opacity-50 transition duration-500 blur"></div>
+                              <div className="relative flex items-center bg-[#050b14] border border-white/10 rounded-xl overflow-hidden shadow-inner">
+                                  <div className="pl-4 text-slate-500"><Terminal size={20} /></div>
+                                  <input 
+                                      value={lobbyCode} 
+                                      onChange={e => setLobbyCode(e.target.value)} 
+                                      className="w-full bg-transparent p-3 lg:p-5 text-center text-xl lg:text-3xl font-black font-mono uppercase tracking-[0.2em] outline-none text-white placeholder:text-slate-800 transition-all focus:placeholder:text-slate-700" 
+                                      placeholder="LOBBY ID" 
+                                      autoFocus
+                                  />
+                              </div>
+                          </div>
+                          
+                          {/* Matchmaking Action Buttons */}
+                          <div className="grid grid-cols-2 gap-3">
+                              <button 
+                                type="submit" 
+                                disabled={deployLoading || !lobbyCode.trim()}
+                                className={`col-span-2 group/btn relative overflow-hidden font-black py-4 rounded-xl shadow-[0_0_20px_rgba(255,255,255,0.1)] transition-all duration-300 flex items-center justify-center ${deployLoading ? 'bg-gray-800 text-white/60 cursor-wait' : 'bg-white text-black hover:shadow-[0_0_40px_rgba(255,255,255,0.2)] hover:scale-[1.02] active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:shadow-none'}`}
+                              >
+                                  <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-purple-600 opacity-0 group-hover/btn:opacity-10 transition-opacity"></div>
+                                  <span className="relative z-10 tracking-widest text-xs flex items-center justify-center gap-2">
+                                      {deployLoading ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> VERIFYING...</> : <><Zap size={14} /> DEPLOY</>}
+                                  </span>
+                              </button>
+                              <button type="button" onClick={() => openOverseerModal()} disabled={modLoading || !lobbyCode.trim()} className={`group/btn relative overflow-hidden font-black py-4 rounded-xl border transition-all duration-300 shadow-[0_0_20px_rgba(239,68,68,0.1)] flex items-center justify-center ${modLoading ? 'bg-red-900/20 text-red-400 border-red-500/30 cursor-wait' : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20 hover:border-red-500/50 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100'}`}>
+                                  <div className="absolute inset-0 bg-gradient-to-r from-red-600/0 via-red-600/10 to-red-600/0 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-700"></div>
+                                  <span className="relative z-10 tracking-widest text-xs flex items-center justify-center gap-2">
+                                      {modLoading ? <><div className="w-3 h-3 border-2 border-red-400 border-t-transparent rounded-full animate-spin" /> VERIFYING...</> : <><Crown size={14} /> OVERSEER</>}
+                                  </span>
+                              </button>
+                              <button 
+                                type="button" 
+                                onClick={() => handleFindLobby('streamer')} 
+                                disabled={streamerLoading || !lobbyCode.trim()}
+                                className={`group/btn relative overflow-hidden font-black py-4 rounded-xl border transition-all duration-300 shadow-[0_0_20px_rgba(168,85,247,0.1)] flex items-center justify-center ${streamerLoading ? 'bg-purple-900/20 text-purple-400 border-purple-500/30 cursor-wait' : 'bg-purple-500/10 text-purple-400 border-purple-500/30 hover:bg-purple-500/20 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:bg-purple-500/10'}`}
+                              >
+                                  <div className="absolute inset-0 bg-gradient-to-r from-purple-600/0 via-purple-600/10 to-purple-600/0 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-700"></div>
+                                  <span className="relative z-10 tracking-widest text-xs flex items-center justify-center gap-2">
+                                      {streamerLoading ? <><div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" /> VERIFYING...</> : <><MonitorPlay size={14} /> STREAMER</>}
+                                  </span>
+                              </button>
+                          </div>
+                      </form>
                   </div>
+              </div>
+              
+              {/* Right Column (Portal Hub) */}
+              <div className="w-full max-w-md md:max-w-full grid grid-cols-2 gap-4 md:gap-6 animate-slide-up" style={{animationDelay: '0.2s'}}>
+                  {/* My Team */}
+                  <button 
+                      type="button"
+                      onClick={() => navigate('/team')}
+                      className="group relative overflow-hidden rounded-3xl border border-emerald-500/20 bg-black/40 backdrop-blur-xl hover:bg-emerald-500/10 transition-all duration-500 shadow-xl flex flex-col items-center justify-center aspect-square md:aspect-auto md:h-40 hover:scale-[1.02] active:scale-95 hover:border-emerald-500/50"
+                  >
+                      <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/0 via-emerald-500/5 to-emerald-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
+                      <div className="p-4 bg-emerald-500/10 rounded-full mb-3 shadow-[0_0_20px_rgba(52,211,153,0.2)] group-hover:shadow-[0_0_40px_rgba(52,211,153,0.5)] transition-all">
+                          <Users size={28} className="text-emerald-400 group-hover:drop-shadow-[0_0_8px_rgba(52,211,153,0.8)]"/>
+                      </div>
+                      <span className="relative z-10 font-black tracking-widest text-sm text-emerald-100">MY TEAM</span>
+                  </button>
+
+                  {/* Tournaments */}
+                  <button 
+                      type="button"
+                      onClick={() => navigate('/tournament')}
+                      className="group relative overflow-hidden rounded-3xl border border-yellow-500/40 bg-black/40 backdrop-blur-xl hover:bg-yellow-500/15 transition-all duration-500 shadow-[0_0_30px_rgba(234,179,8,0.1)] hover:shadow-[0_0_50px_rgba(234,179,8,0.3)] flex flex-col items-center justify-center aspect-square md:aspect-auto md:h-40 hover:scale-[1.02] active:scale-95"
+                  >
+                      <div className="absolute inset-0 bg-gradient-to-br from-yellow-500/0 via-yellow-500/10 to-yellow-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
+                      <div className="absolute inset-0 bg-yellow-400/5 mix-blend-overlay"></div>
+                      <div className="p-4 bg-yellow-500/10 rounded-full mb-3 shadow-[0_0_20px_rgba(234,179,8,0.3)] group-hover:shadow-[0_0_50px_rgba(234,179,8,0.6)] transition-all animate-pulse-slow">
+                          <Trophy size={32} className="text-yellow-400 drop-shadow-[0_0_12px_rgba(234,179,8,0.8)]"/>
+                      </div>
+                      <span className="relative z-10 font-black tracking-widest text-sm text-yellow-100">TOURNAMENTS</span>
+                  </button>
+
+                  {/* Archive */}
+                  <button 
+                      type="button"
+                      onClick={() => navigate('/logs')}
+                      className="group relative overflow-hidden rounded-3xl border border-purple-500/20 bg-black/40 backdrop-blur-xl hover:bg-purple-500/10 transition-all duration-500 shadow-xl flex flex-col items-center justify-center aspect-square md:aspect-auto md:h-40 hover:scale-[1.02] active:scale-95 hover:border-purple-500/50"
+                  >
+                      <div className="absolute inset-0 bg-gradient-to-br from-purple-500/0 via-purple-500/5 to-purple-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
+                      <div className="p-4 bg-purple-500/10 rounded-full mb-3 shadow-[0_0_20px_rgba(168,85,247,0.2)] group-hover:shadow-[0_0_40px_rgba(168,85,247,0.5)] transition-all">
+                          <Castle size={28} className="text-purple-400 group-hover:drop-shadow-[0_0_8px_rgba(168,85,247,0.8)]"/>
+                      </div>
+                      <span className="relative z-10 font-black tracking-widest text-sm text-purple-100">ARCHIVE</span>
+                  </button>
+
+                  {/* Referee Tools (Conditional vs Empty Slot) */}
+                  {profile?.role === 'moderator' ? (
+                      <button 
+                          onClick={() => navigate('/referee')}
+                          className="group relative overflow-hidden rounded-3xl border border-red-500/30 bg-black/40 backdrop-blur-xl hover:bg-red-500/15 transition-all duration-500 shadow-[0_0_20px_rgba(239,68,68,0.15)] flex flex-col items-center justify-center aspect-square md:aspect-auto md:h-40 hover:scale-[1.02] active:scale-95 hover:border-red-500/60"
+                      >
+                          <div className="absolute inset-0 bg-gradient-to-br from-red-500/0 via-red-500/10 to-red-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
+                          <div className="p-4 bg-red-500/10 rounded-full mb-3 shadow-[0_0_20px_rgba(239,68,68,0.3)] group-hover:shadow-[0_0_40px_rgba(239,68,68,0.6)] transition-all">
+                              <Gavel size={28} className="text-red-500 drop-shadow-[0_0_12px_rgba(239,68,68,0.8)]"/>
+                          </div>
+                          <span className="relative z-10 font-black tracking-widest text-sm text-red-100">REFEREE</span>
+                      </button>
+                  ) : (
+                      <div className="hidden md:flex rounded-3xl border border-white/5 bg-black/20 backdrop-blur-xl items-center justify-center aspect-square md:aspect-auto md:h-40 opacity-50">
+                          {/* Placeholder to keep grid balanced on desktop if non-mod */}
+                      </div>
+                  )}
               </div>
           </div>
           
-          {/* Disclaimer */}
-          <div className="absolute bottom-4 left-0 w-full text-center px-4 pointer-events-none">
-              <p className="text-[9px] text-slate-600 font-medium tracking-wide max-w-xl mx-auto leading-tight pointer-events-auto">
+          {/* 3. Footer (Centered, Bottom) */}
+          <div className="relative z-10 flex flex-col items-center w-full pb-0 animate-fade-in" style={{animationDelay: '0.4s'}}>
+              <div className="flex flex-col md:flex-row items-center gap-4 md:gap-6 p-4 rounded-2xl border border-white/5 bg-black/20 backdrop-blur-sm mb-6 shadow-xl">
+                  <div className="flex items-center gap-4">
+                      <img src="/Logo.png" alt="Logo" className="w-12 h-12 object-contain drop-shadow-lg" />
+                      <span className="text-sm font-black tracking-[0.15em] uppercase text-slate-300 text-shadow">
+                          CLASH OF CLANS ELITE NETWORK
+                      </span>
+                  </div>
+                  
+                  <div className="hidden md:block w-px h-8 bg-white/10"></div>
+                  
+                  <a 
+                      href="https://t.me/CoCEliteNetwork" 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all hover:scale-105 active:scale-95 shadow-lg shadow-blue-500/20 hover:shadow-blue-500/40"
+                  >
+                      VISIT CHANNEL <ExternalLink size={12} />
+                  </a>
+              </div>
+              
+              <p className="text-[9px] text-slate-600 font-medium tracking-wide max-w-xl text-center leading-tight px-4">
                   This material is unofficial and is not endorsed by Supercell. For more information see Supercell's Fan Content Policy: <a href="https://www.supercell.com/fan-content-policy" target="_blank" rel="noopener noreferrer" className="hover:text-slate-400 underline transition-colors">www.supercell.com/fan-content-policy</a>.
               </p>
           </div>
-        </div>
+       </div>
       </>
         )
       } />
@@ -1524,7 +1559,7 @@ function AppContent() {
                         <LogOut size={18} className="text-slate-400 group-hover:text-white transition-colors"/> <span className="text-slate-400 group-hover:text-white transition-colors">Disconnect</span>
                     </button>
                     <div className="flex flex-col md:flex-row gap-4 w-full md:w-auto">
-                        <button onClick={handleEndMatch} className="w-full md:w-auto group bg-green-600 hover:bg-green-500 px-6 py-3 md:px-8 md:py-4 rounded-xl font-black flex items-center justify-center gap-3 text-xs tracking-widest uppercase transition-all shadow-[0_0_30px_rgba(34,197,94,0.4)] hover:shadow-[0_0_50px_rgba(34,197,94,0.6)] hover:-translate-y-1 active:translate-y-0 relative overflow-hidden">
+                        <button onClick={handleEndMatchClick} className="w-full md:w-auto group bg-green-600 hover:bg-green-500 px-6 py-3 md:px-8 md:py-4 rounded-xl font-black flex items-center justify-center gap-3 text-xs tracking-widest uppercase transition-all shadow-[0_0_30px_rgba(34,197,94,0.4)] hover:shadow-[0_0_50px_rgba(34,197,94,0.6)] hover:-translate-y-1 active:translate-y-0 relative overflow-hidden">
                             <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
                             <Check size={18} className="relative z-10"/> <span className="relative z-10">END MATCH</span>
                         </button>
@@ -1929,6 +1964,7 @@ function AppContent() {
   </>} />
   <Route path="/logs" element={<MatchLogs />} />
   <Route path="/team" element={<TeamHub />} />
+  <Route path="/tournament" element={<TournamentHub />} />
   <Route path="*" element={<Navigate to="/" replace />} />
 </Routes>
 
@@ -2020,6 +2056,62 @@ function AppContent() {
                         )}
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+)}
+{showEndMatchModal && (
+    <div className="fixed inset-0 bg-black/90 z-[110] flex items-center justify-center p-4 backdrop-blur-xl animate-fade-in" onClick={() => setShowEndMatchModal(false)}>
+        <div className="glass border border-white/10 rounded-[2.5rem] w-full max-w-2xl overflow-hidden bg-[#0a101f] relative shadow-2xl" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="p-6 border-b border-white/10 bg-[#0a101f]/95 backdrop-blur-md">
+                <h3 className="text-3xl font-black text-center tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-red-400 to-orange-400">
+                    MATCH CONCLUSION
+                </h3>
+                <p className="text-center text-slate-400 text-[10px] font-bold tracking-[0.2em] uppercase mt-2">Enter Combat Reports</p>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 md:p-8 space-y-8 relative">
+                 <div className="absolute top-0 right-0 w-64 h-64 bg-red-500/5 rounded-full blur-[100px] pointer-events-none"></div>
+                 {lobbyTeams.map(team => (
+                     <div key={team.id} className="bg-black/40 rounded-2xl p-6 border border-white/5 space-y-4">
+                         <h4 className="font-black text-xl text-white tracking-widest uppercase">{team.name}</h4>
+                         <div className="grid grid-cols-2 gap-6">
+                             <div>
+                                 <label className="block text-[10px] font-black text-yellow-500 tracking-[0.2em] uppercase mb-2 flex items-center gap-2"><Trophy size={12}/> Stars</label>
+                                 <input 
+                                     type="number" 
+                                     min="0"
+                                     value={endMatchScores[team.id]?.stars || ''}
+                                     onChange={e => setEndMatchScores(prev => ({ ...prev, [team.id]: { ...prev[team.id], stars: e.target.value } }))}
+                                     className="w-full bg-[#050b14] border border-white/10 focus:border-yellow-500/50 rounded-xl p-4 font-bold text-white outline-none transition-all shadow-inner text-center text-2xl"
+                                     placeholder="0"
+                                 />
+                             </div>
+                             <div>
+                                 <label className="block text-[10px] font-black text-blue-400 tracking-[0.2em] uppercase mb-2 flex items-center gap-2"><ArrowRight size={12}/> Destruction %</label>
+                                 <input 
+                                     type="number" 
+                                     min="0"
+                                     step="0.1"
+                                     max="100"
+                                     value={endMatchScores[team.id]?.percentage || ''}
+                                     onChange={e => setEndMatchScores(prev => ({ ...prev, [team.id]: { ...prev[team.id], percentage: e.target.value } }))}
+                                     className="w-full bg-[#050b14] border border-white/10 focus:border-blue-500/50 rounded-xl p-4 font-bold text-white outline-none transition-all shadow-inner text-center text-2xl"
+                                     placeholder="0.0"
+                                 />
+                             </div>
+                         </div>
+                     </div>
+                 ))}
+                 
+                 <div className="flex gap-4 pt-4 border-t border-white/10">
+                     <button type="button" onClick={() => setShowEndMatchModal(false)} className="flex-1 py-4 px-6 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shadow-lg active:scale-95">CANCEL</button>
+                     <button type="button" onClick={submitEndMatch} disabled={modLoading} className="flex-1 py-4 px-6 bg-green-600 hover:bg-green-500 text-white rounded-xl font-black text-[10px] uppercase tracking-[0.2em] transition-all shadow-[0_0_20px_rgba(34,197,94,0.4)] hover:shadow-[0_0_30px_rgba(34,197,94,0.6)] active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2">
+                         {modLoading ? 'ARCHIVING...' : <><ChevronRight size={16}/> CONFIRM & ARCHIVE</>}
+                     </button>
+                 </div>
             </div>
         </div>
     </div>

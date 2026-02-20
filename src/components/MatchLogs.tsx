@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { ArrowLeft, Trophy, Users, Copy, Check, X, Search } from 'lucide-react';
+import { ArrowLeft, Trophy, Users, Copy, Check, X, Search, Star, Activity } from 'lucide-react';
 
 export const MatchLogs = () => {
     const navigate = useNavigate();
@@ -114,31 +114,67 @@ export const MatchLogs = () => {
                                     </div>
                                     <div className="text-slate-500 text-[10px] font-mono">{formatDate(log.played_at)}</div>
                                 </div>
-                                <div className="flex items-center gap-3 text-2xl font-black text-white mb-2 tracking-tight">
+                                <div className="mt-6 mb-2">
                                     {(() => {
                                         const teams = log.match_data || [];
                                         const t1 = teams[0] || {};
                                         const t2 = teams[1] || {};
-                                        const s1 = parseInt(t1.score || '0', 10);
-                                        const s2 = parseInt(t2.score || '0', 10);
-                                        const winnerId = s1 > s2 ? t1.team_id : s2 > s1 ? t2.team_id : null;
+                                        
+                                        // Legacy support (string/number) vs New Object {stars, percentage}
+                                        const parseScore = (scoreRaw: any) => {
+                                            if (typeof scoreRaw === 'object' && scoreRaw !== null) return { s: parseInt(scoreRaw.stars || '0', 10), p: parseFloat(scoreRaw.percentage || '0') };
+                                            if (typeof scoreRaw === 'string' && scoreRaw.trim().startsWith('{')) {
+                                                try {
+                                                    const parsed = JSON.parse(scoreRaw);
+                                                    return { s: parseInt(parsed.stars || '0', 10), p: parseFloat(parsed.percentage || '0') };
+                                                } catch(e) {}
+                                            }
+                                            return { s: parseInt(scoreRaw || '0', 10), p: 0 };
+                                        };
+                                        
+                                        const score1 = parseScore(t1.score);
+                                        const score2 = parseScore(t2.score);
+                                        
+                                        let winnerId = null;
+                                        if (score1.s > score2.s) winnerId = t1.team_id;
+                                        else if (score2.s > score1.s) winnerId = t2.team_id;
+                                        else if (score1.p > score2.p) winnerId = t1.team_id;
+                                        else if (score2.p > score1.p) winnerId = t2.team_id;
 
                                         return (
-                                            <>
-                                                <span className={`${winnerId === t1.team_id ? 'text-yellow-500 drop-shadow-[0_0_10px_rgba(234,179,8,0.5)]' : 'text-slate-400'} transition-colors flex items-center gap-2`}>
-                                                    {winnerId === t1.team_id && <Trophy className="w-5 h-5 text-yellow-500" />}
-                                                    {t1.team_name || 'UNK'} <span className="text-sm opacity-60">[{t1.score || 0}]</span>
-                                                </span>
-                                                <span className="text-slate-600 text-sm font-mono">VS</span>
-                                                <span className={`${winnerId === t2.team_id ? 'text-yellow-500 drop-shadow-[0_0_10px_rgba(234,179,8,0.5)]' : 'text-slate-400'} transition-colors flex items-center gap-2`}>
-                                                    {t2.team_name || 'UNK'} <span className="text-sm opacity-60">[{t2.score || 0}]</span>
-                                                    {winnerId === t2.team_id && <Trophy className="w-5 h-5 text-yellow-500" />}
-                                                </span>
-                                            </>
+                                            <div className="flex items-center justify-between w-full gap-2">
+                                                {/* Team 1 */}
+                                                <div className={`flex flex-col flex-1 min-w-0 ${winnerId === t1.team_id ? '' : 'opacity-80'}`}>
+                                                    <div className={`flex items-center gap-2 font-black text-2xl md:text-3xl truncate ${winnerId === t1.team_id ? 'text-yellow-500 drop-shadow-[0_0_10px_rgba(234,179,8,0.5)]' : 'text-slate-300'}`}>
+                                                        {winnerId === t1.team_id && <Trophy size={16} className="shrink-0" />}
+                                                        <span className="truncate tracking-tighter" title={t1.team_name || 'UNK'}>{t1.team_name || 'UNK'}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2 text-sm text-slate-400 font-mono mt-2">
+                                                        <span className="flex items-center gap-1.5 font-bold text-yellow-500/90"><Star size={14} className="fill-yellow-500/50"/> {score1.s}</span>
+                                                        {score1.p > 0 && <span className="text-slate-600">|</span>}
+                                                        {score1.p > 0 && <span className="flex items-center gap-1.5 font-bold text-blue-400/90"><Activity size={14}/> {score1.p}%</span>}
+                                                    </div>
+                                                </div>
+
+                                                <div className="shrink-0 font-black italic text-slate-600/40 text-sm px-2">VS</div>
+
+                                                {/* Team 2 */}
+                                                <div className={`flex flex-col flex-1 items-end min-w-0 ${winnerId === t2.team_id ? '' : 'opacity-80'}`}>
+                                                    <div className={`flex items-center justify-end gap-2 w-full font-black text-2xl md:text-3xl truncate ${winnerId === t2.team_id ? 'text-yellow-500 drop-shadow-[0_0_10px_rgba(234,179,8,0.5)]' : 'text-slate-300'}`}>
+                                                        <span className="truncate tracking-tighter text-right" title={t2.team_name || 'UNK'}>{t2.team_name || 'UNK'}</span>
+                                                        {winnerId === t2.team_id && <Trophy size={16} className="shrink-0" />}
+                                                    </div>
+                                                    <div className="flex items-center justify-end gap-2 text-sm text-slate-400 font-mono mt-2">
+                                                        <span className="flex items-center gap-1.5 font-bold text-yellow-500/90"><Star size={14} className="fill-yellow-500/50"/> {score2.s}</span>
+                                                        {score2.p > 0 && <span className="text-slate-600">|</span>}
+                                                        {score2.p > 0 && <span className="flex items-center gap-1.5 font-bold text-blue-400/90"><Activity size={14}/> {score2.p}%</span>}
+                                                    </div>
+                                                </div>
+                                            </div>
                                         );
                                     })()}
                                 </div>
-                                <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
+                                <div className="flex items-center gap-2 text-xs text-slate-500 font-mono mt-6 pt-4 border-t border-white/5">
                                     <Users size={12}/>
                                     {log.match_data?.reduce((sum:number, t:any) => sum + (t.players?.length || 0), 0) || 0} Operatives
                                 </div>
@@ -181,9 +217,24 @@ export const MatchLogs = () => {
                                 {selectedMatch.match_data?.map((team: any, idx: number) => {
                                     const teams = selectedMatch.match_data;
                                     const otherTeam = teams[idx === 0 ? 1 : 0];
-                                    const myScore = parseInt(team.score || '0', 10);
-                                    const otherScore = parseInt(otherTeam?.score || '0', 10);
-                                    const isWinner = myScore > otherScore;
+                                    
+                                    const parseScore = (scoreRaw: any) => {
+                                        if (typeof scoreRaw === 'object' && scoreRaw !== null) return { s: parseInt(scoreRaw.stars || '0', 10), p: parseFloat(scoreRaw.percentage || '0') };
+                                        if (typeof scoreRaw === 'string' && scoreRaw.trim().startsWith('{')) {
+                                            try {
+                                                const parsed = JSON.parse(scoreRaw);
+                                                return { s: parseInt(parsed.stars || '0', 10), p: parseFloat(parsed.percentage || '0') };
+                                            } catch(e) {}
+                                        }
+                                        return { s: parseInt(scoreRaw || '0', 10), p: 0 };
+                                    };
+                                    
+                                    const myScore = parseScore(team.score);
+                                    const otherScore = parseScore(otherTeam?.score);
+                                    
+                                    let isWinner = false;
+                                    if (myScore.s > otherScore.s) isWinner = true;
+                                    else if (myScore.s === otherScore.s && myScore.p > otherScore.p) isWinner = true;
 
                                     return (
                                     <div key={idx} className={`relative rounded-3xl p-6 md:p-8 border transition-all ${isWinner ? 'bg-yellow-900/10 border-yellow-500/30 shadow-[0_0_50px_rgba(234,179,8,0.1)]' : 'bg-[#0a101f] border-white/5 opacity-80'}`}>
@@ -192,11 +243,18 @@ export const MatchLogs = () => {
                                                 <Trophy size={10} className="fill-black" /> VICTORY
                                             </div>
                                         )}
-                                        <div className="flex justify-between items-center mb-8 pb-4 border-b border-white/5">
-                                            <h3 className={`text-3xl font-black uppercase tracking-tight flex items-center gap-3 ${isWinner ? 'text-yellow-500 drop-shadow-sm' : 'text-slate-500'}`}>
-                                                {team.team_name} <span className={`text-2xl ${isWinner ? 'text-white' : 'text-slate-600'}`}>[{team.score || '-'}]</span>
-                                            </h3>
-                                            <div className="font-mono text-xl font-bold text-yellow-500">
+                                        <div className="flex justify-between items-start mb-8 pb-4 border-b border-white/5 gap-4">
+                                            <div className="flex flex-col gap-2 min-w-0">
+                                                <h3 className={`text-3xl font-black uppercase tracking-tight flex items-center gap-3 truncate ${isWinner ? 'text-yellow-500 drop-shadow-sm' : 'text-slate-500'}`}>
+                                                    <span className="truncate" title={team.team_name || 'UNK'}>{team.team_name || 'UNK'}</span> {isWinner && <Trophy size={20} className="shrink-0" />}
+                                                </h3>
+                                                <div className="flex flex-wrap items-center gap-2 text-sm text-slate-400 font-mono bg-black/20 px-3 py-1.5 rounded-lg border border-white/5 w-fit">
+                                                    <span className="flex items-center gap-1.5 font-bold text-yellow-500/90"><Star size={14} className="fill-yellow-500/50"/> {myScore.s}</span>
+                                                    {myScore.p > 0 && <span className="text-slate-600">|</span>}
+                                                    {myScore.p > 0 && <span className="flex items-center gap-1.5 font-bold text-blue-400/90"><Activity size={14}/> {myScore.p}%</span>}
+                                                </div>
+                                            </div>
+                                            <div className="font-mono text-xl font-bold text-yellow-500 shrink-0 mt-1">
                                                 {team.budget}g
                                             </div>
                                         </div>
