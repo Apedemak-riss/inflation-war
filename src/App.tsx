@@ -13,16 +13,10 @@ import { TournamentHub } from './components/TournamentHub';
 import { Shield, Sword, Coins, ExternalLink, Hammer, Crown, Minus, Check, Users, RefreshCw, Trash2, Trophy, ArrowRightLeft, LogOut, Gavel, MonitorPlay, ClipboardCheck, AlertTriangle, Loader2, Edit2, Save, X, Tv, PawPrint, Castle, Terminal, Wifi, Lock, Zap, Skull, Hexagon, Crosshair, Settings, ArrowRight, ChevronRight } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
-// --- CONFIGURATION ---
-
-const STREAMER_PREFIX = "streamer:";
+// --- TYPES ---
 const HERO_LINK_IDS: Record<string, number> = { BK: 0, AQ: 1, GW: 2, RC: 4, MP: 6 };
 const LIMITS = { troop: 340, siege: 3, spell: 11 };
 const CC_LIMITS = { troop: 55, siege: 2, spell: 4 };
-
-
-
-// --- TYPES ---
 
 type ItemType = 'troop' | 'siege' | 'spell' | 'super_troop' | 'equipment' | 'pet';
 type HeroType = 'BK' | 'AQ' | 'GW' | 'RC' | 'MP' | null;
@@ -382,6 +376,19 @@ function AppContent() {
     if (teams) setLobbyTeams(teams);
   };
 
+  useEffect(() => {
+    if (location.pathname.startsWith('/stream/') && lobbyCode && !foundLobby) {
+        const loadStreamData = async () => {
+            const { data: lobby } = await supabase.from('lobbies').select('*').eq('code', lobbyCode).single();
+            if (lobby) {
+                setFoundLobby(lobby);
+                fetchTeams(lobby.id);
+            }
+        };
+        loadStreamData();
+    }
+  }, [location.pathname, lobbyCode, foundLobby]);
+
   const handleFindLobby = async (e?: React.FormEvent | string, modeArg?: string, retryCount = 0) => {
     let mode: string = modeArg || '/join';
     if (e && typeof e === 'object' && 'preventDefault' in e) {
@@ -391,9 +398,6 @@ function AppContent() {
     }
 
     let code = lobbyCode.trim().toUpperCase();
-    if (code.toLowerCase().startsWith(STREAMER_PREFIX.toLowerCase())) {
-      mode = '/streamer'; code = code.substring(STREAMER_PREFIX.length).toUpperCase();
-    }
     setLobbyCode(code);
 
     // Pick the right loading setter for this button
@@ -414,7 +418,14 @@ function AppContent() {
          const { data: nl } = await withTimeout<any>(supabase.from('lobbies').insert({ code }).select().single());
          lobby = nl; await withTimeout(supabase.from('teams').insert([{ lobby_id: nl.id, name: 'Team 1', budget: 100 }, { lobby_id: nl.id, name: 'Team 2', budget: 100 }]));
       } else if (!lobby) { setLoading(false); return alert("Not found"); }
-      setFoundLobby(lobby); fetchTeams(lobby.id); navigate(mode);
+      setFoundLobby(lobby); 
+      fetchTeams(lobby.id); 
+      
+      if (mode === 'streamer') {
+          navigate(`/stream/${lobby.code}`);
+      } else {
+          navigate(mode);
+      }
     } catch (err: any) {
       console.error('[FindLobby] Error:', err);
       const isAbort = (err instanceof DOMException && err.name === 'AbortError') ||
@@ -641,7 +652,7 @@ function AppContent() {
           supabase.removeChannel(ch); 
       };
     }
-    if (foundLobby && (location.pathname === '/moderator' || location.pathname === '/streamer')) {
+    if (foundLobby && (location.pathname === '/moderator' || location.pathname.startsWith('/stream/'))) {
       const ch = supabase.channel('admin')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, () => fetchTeams(foundLobby.id))
         .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => fetchTeams(foundLobby.id))
@@ -1380,7 +1391,7 @@ function AppContent() {
                               >
                                   <div className="absolute inset-0 bg-gradient-to-r from-purple-600/0 via-purple-600/10 to-purple-600/0 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-700"></div>
                                   <span className="relative z-10 tracking-widest text-xs flex items-center justify-center gap-2">
-                                      {streamerLoading ? <><div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" /> VERIFYING...</> : <><MonitorPlay size={14} /> STREAMER</>}
+                                      {streamerLoading ? <><div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" /> VERIFYING...</> : <><MonitorPlay size={14} /> STREAM</>}
                                   </span>
                               </button>
                           </div>
@@ -1576,8 +1587,10 @@ function AppContent() {
 
   } />
 
-  <Route path="/streamer" element={
-        <div className="min-h-screen bg-[#050b14] text-white p-6 pb-20 overflow-hidden relative animate-fade-in font-sans selection:bg-purple-500/30">
+  <Route path="/stream/:code" element={
+        <>
+            <LobbyCodeSync setLobbyCode={setLobbyCode} />
+            <div className="min-h-screen bg-[#050b14] text-white p-6 pb-20 overflow-hidden relative animate-fade-in font-sans selection:bg-purple-500/30">
             <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150 mix-blend-overlay pointer-events-none"></div>
             
             <style>{`
@@ -1679,7 +1692,7 @@ function AppContent() {
                 </div>
             </div>
         </div>
-
+        </>
   } />
 
   <Route path="/moderator" element={

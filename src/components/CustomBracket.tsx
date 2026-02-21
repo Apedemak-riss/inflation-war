@@ -6,13 +6,12 @@ import { NeonBracketMatch } from './NeonBracketMatch';
 import { fetchParticipants } from '../services/challongeService'; // Wait, fetchOpenMatches fetches state=open. But for the full bracket we need ALL matches.
 import { transformChallongeData } from '../utils/bracketTransforms';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
+import { BracketContext } from '../contexts/BracketContext';
 
 // We need a specific fetch for ALL matches to build the bracket
 // So I will expand challongeService or just fetch here
 const API_KEY = import.meta.env.VITE_CHALLONGE_API_KEY || '';
-
-// Create a context to pass down the current user ID to the match nodes
-export const BracketUserContext = React.createContext<string | null>(null);
 
 interface CustomBracketProps {
     tournamentUrl: string;
@@ -23,6 +22,46 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl }) =
     const [matches, setMatches] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [userChallongeId, setUserChallongeId] = useState<string | null>(null);
+    const [activeMatches, setActiveMatches] = useState<Record<string, string>>({});
+
+    useEffect(() => {
+        const fetchUserChallongeId = async () => {
+            if (user?.id) {
+                // Find if the current user is a captain of a roster
+                const { data, error } = await supabase
+                    .from('rosters')
+                    .select('challonge_participant_id')
+                    .eq('captain_id', user.id)
+                    .single();
+                
+                if (!error && data?.challonge_participant_id) {
+                    setUserChallongeId(data.challonge_participant_id.toString());
+                }
+            }
+        };
+        fetchUserChallongeId();
+    }, [user]);
+
+    useEffect(() => {
+        const fetchActiveMatches = async () => {
+            const { data: liveLobbies } = await supabase
+                .from('lobbies')
+                .select('challonge_match_id, code')
+                .not('challonge_match_id', 'is', null);
+
+            if (liveLobbies) {
+                const liveMap: Record<string, string> = {};
+                liveLobbies.forEach(lobby => {
+                    if (lobby.challonge_match_id && lobby.code) {
+                        liveMap[lobby.challonge_match_id] = lobby.code;
+                    }
+                });
+                setActiveMatches(liveMap);
+            }
+        };
+        fetchActiveMatches();
+    }, []);
 
     useEffect(() => {
         const loadBracket = async () => {
@@ -102,7 +141,11 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl }) =
     return (
         <div className="w-full h-full overflow-hidden bg-[#050b14] rounded-2xl border border-white/5 shadow-2xl">
             <StyleSheetManager shouldForwardProp={(prop) => !['won', 'hovered', 'highlighted', 'bottomHovered', 'topHovered'].includes(prop)}>
-                <BracketUserContext.Provider value={user?.user_metadata?.roster_id || null}>
+                <BracketContext.Provider value={{ 
+                    currentUserChallongeId: userChallongeId,
+                    tournamentUrl,
+                    activeMatches
+                }}>
                     <SingleEliminationBracket
                         matches={matches}
                         matchComponent={NeonBracketMatch}
@@ -117,12 +160,13 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl }) =
                                 },
                                 connectorColor: 'rgba(255,255,255,0.1)',
                                 connectorColorHighlight: '#ef4444', // Red glow
-                                width: 400,
-                                boxHeight: 120,
+                                width: 440,
+                                matchWidth: 440,
+                                boxHeight: 180,
                                 canvasPadding: 50
                             }
                         }}
-                        svgWrapper={({ children, ...props }: React.PropsWithChildren<any>) => (
+                        svgWrapper={({ children, bracketWidth, bracketHeight, startAt, ...props }: React.PropsWithChildren<any>) => (
                             <div className="w-full h-[800px] overflow-auto scrollbar-thin scrollbar-thumb-yellow-500/50 scrollbar-track-transparent">
                                 <svg 
                                     width={props.width || 1200} 
@@ -136,7 +180,7 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl }) =
                             </div>
                         )}
                     />
-                </BracketUserContext.Provider>
+                </BracketContext.Provider>
             </StyleSheetManager>
         </div>
     );
