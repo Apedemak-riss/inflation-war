@@ -11,7 +11,7 @@ import { BracketContext } from '../contexts/BracketContext';
 
 // We need a specific fetch for ALL matches to build the bracket
 // So I will expand challongeService or just fetch here
-const API_KEY = import.meta.env.VITE_CHALLONGE_API_KEY || '';
+const API_KEY = (import.meta.env.VITE_CHALLONGE_API_KEY || '').replace(/['"]/g, '').trim();
 
 interface CustomBracketProps {
     tournamentUrl: string;
@@ -116,7 +116,13 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl }) =
                 const matchesUrl = `https://corsproxy.io/?${encodeURIComponent(`https://api.challonge.com/v1/tournaments/${tournamentUrl}/matches.json?api_key=${API_KEY}&_=${timestamp}`)}`;
                 
                 const [matchesRes, participantsData] = await Promise.all([
-                    fetch(matchesUrl).then(res => res.json()),
+                    fetch(matchesUrl).then(async res => {
+                        if (!res.ok) {
+                            const errText = await res.text();
+                            throw new Error(`HTTP ${res.status}: ${errText}`);
+                        }
+                        return res.json();
+                    }),
                     fetchParticipants(tournamentUrl)
                 ]);
                 

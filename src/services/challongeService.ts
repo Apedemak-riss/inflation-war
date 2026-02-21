@@ -1,4 +1,4 @@
-const API_KEY = import.meta.env.VITE_CHALLONGE_API_KEY || '';
+const API_KEY = (import.meta.env.VITE_CHALLONGE_API_KEY || '').replace(/['"]/g, '').trim();
 
 // We use corsproxy.io to bypass browser CORS blocks for the API
 const buildUrl = (endpoint: string) => `https://corsproxy.io/?${encodeURIComponent(`https://api.challonge.com/v1${endpoint}.json?api_key=${API_KEY}`)}`;
@@ -11,7 +11,8 @@ export const fetchParticipants = async (tournamentId: string) => {
     const url = buildUrl(`/tournaments/${tournamentId}/participants`);
     const response = await fetch(url);
     if (!response.ok) {
-        throw new Error(`Challonge API Error: ${response.statusText}`);
+        const errorBody = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorBody}`);
     }
     return await response.json();
 };
@@ -27,7 +28,8 @@ export const fetchOpenMatches = async (tournamentId: string) => {
     
     const response = await fetch(url);
     if (!response.ok) {
-        throw new Error(`Challonge API Error: ${response.statusText}`);
+        const errorBody = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorBody}`);
     }
     return await response.json();
 };
