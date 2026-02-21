@@ -9,10 +9,6 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { BracketContext } from '../contexts/BracketContext';
 
-// We need a specific fetch for ALL matches to build the bracket
-// So I will expand challongeService or just fetch here
-const API_KEY = (import.meta.env.VITE_CHALLONGE_API_KEY || '').replace(/['"]/g, '').trim();
-
 interface CustomBracketProps {
     tournamentUrl: string;
 }
@@ -113,16 +109,17 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl }) =
             try {
                 // Fetch all matches (not just open)
                 const timestamp = new Date().getTime();
-                const matchesUrl = `https://corsproxy.io/?${encodeURIComponent(`https://api.challonge.com/v1/tournaments/${tournamentUrl}/matches.json?api_key=${API_KEY}&_=${timestamp}`)}`;
+                const endpoint = `/tournaments/${tournamentUrl}/matches.json?_=${timestamp}`;
                 
+                const matchesPromise = supabase.functions.invoke('challonge-proxy', {
+                    body: { endpoint, method: 'GET' }
+                }).then(({ data, error }) => {
+                    if (error) throw new Error(`Edge Function Error: ${error.message}`);
+                    return data;
+                });
+
                 const [matchesRes, participantsData] = await Promise.all([
-                    fetch(matchesUrl).then(async res => {
-                        if (!res.ok) {
-                            const errText = await res.text();
-                            throw new Error(`HTTP ${res.status}: ${errText}`);
-                        }
-                        return res.json();
-                    }),
+                    matchesPromise,
                     fetchParticipants(tournamentUrl)
                 ]);
                 
