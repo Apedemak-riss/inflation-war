@@ -377,7 +377,7 @@ function AppContent() {
   };
 
   useEffect(() => {
-    if (location.pathname.startsWith('/stream/') && lobbyCode && !foundLobby) {
+    if ((location.pathname.startsWith('/stream/') || location.pathname.startsWith('/join/')) && lobbyCode && !foundLobby) {
         const loadStreamData = async () => {
             const { data: lobby } = await supabase.from('lobbies').select('*').eq('code', lobbyCode).single();
             if (lobby) {

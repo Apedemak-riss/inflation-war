@@ -23,20 +23,38 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl }) =
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [userChallongeId, setUserChallongeId] = useState<string | null>(null);
+    const [isCaptain, setIsCaptain] = useState<boolean>(false);
     const [activeMatches, setActiveMatches] = useState<Record<string, string>>({});
 
     useEffect(() => {
         const fetchUserChallongeId = async () => {
             if (user?.id) {
-                // Find if the current user is a captain of a roster
-                const { data, error } = await supabase
+                // 1. Find if the current user is a captain of a roster
+                const { data: captainData, error: captainError } = await supabase
                     .from('rosters')
                     .select('challonge_participant_id')
                     .eq('captain_id', user.id)
                     .single();
                 
-                if (!error && data?.challonge_participant_id) {
-                    setUserChallongeId(data.challonge_participant_id.toString());
+                if (!captainError && captainData?.challonge_participant_id) {
+                    setUserChallongeId(captainData.challonge_participant_id.toString());
+                    setIsCaptain(true);
+                } else {
+                    // 2. If not a captain, check if they are a member
+                    const { data: memberData, error: memberError } = await supabase
+                        .from('roster_members')
+                        .select('rosters(challonge_participant_id)')
+                        .eq('user_id', user.id)
+                        .single();
+                        
+                    if (!memberError && memberData?.rosters) {
+                        const rostersData = memberData.rosters as any;
+                        const challongeId = Array.isArray(rostersData) ? rostersData[0]?.challonge_participant_id : rostersData?.challonge_participant_id;
+                        if (challongeId) {
+                            setUserChallongeId(challongeId.toString());
+                            setIsCaptain(false);
+                        }
+                    }
                 }
             }
         };
@@ -60,7 +78,32 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl }) =
                 setActiveMatches(liveMap);
             }
         };
+
         fetchActiveMatches();
+
+        // Set up real-time listener for new bracket lobbies synchronously
+        const channel = supabase.channel('bracket_lobbies_events')
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'lobbies' },
+                (payload) => {
+                    console.log('Bracket realtime event:', payload);
+                    const newRecord = payload.new as any;
+                    if (newRecord && newRecord.challonge_match_id && newRecord.code) {
+                        setActiveMatches(prev => ({
+                            ...prev,
+                            [newRecord.challonge_match_id]: newRecord.code
+                        }));
+                    }
+                }
+            )
+            .subscribe((status) => {
+                console.log('Bracket realtime status:', status);
+            });
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
     }, []);
 
     useEffect(() => {
@@ -143,6 +186,7 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl }) =
             <StyleSheetManager shouldForwardProp={(prop) => !['won', 'hovered', 'highlighted', 'bottomHovered', 'topHovered'].includes(prop)}>
                 <BracketContext.Provider value={{ 
                     currentUserChallongeId: userChallongeId,
+                    isCaptain,
                     tournamentUrl,
                     activeMatches
                 }}>

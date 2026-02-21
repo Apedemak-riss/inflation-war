@@ -172,7 +172,7 @@ export const NeonBracketMatch: React.FC<NeonBracketMatchProps> = ({
     bottomParty
 }) => {
     // Current user's roster ID injected via Context from CustomBracket.tsx
-    const { currentUserChallongeId, activeMatches } = useContext(BracketContext);
+    const { currentUserChallongeId, isCaptain, activeMatches } = useContext(BracketContext);
     const navigate = useNavigate();
     const [isJoining, setIsJoining] = useState(false);
 
@@ -240,9 +240,23 @@ export const NeonBracketMatch: React.FC<NeonBracketMatchProps> = ({
             </MatchWrapper>
             
             {showJoinButton && (
-                <JoinButton onClick={handleJoinClick} disabled={isJoining} style={{ opacity: isJoining ? 0.5 : 1 }}>
-                    {isJoining ? 'ENTERING...' : 'ENTER LOBBY'}
-                </JoinButton>
+                <>
+                    {isLive ? (
+                        <JoinButton onClick={(e) => { e.stopPropagation(); navigate(`/join/${liveLobbyCode}`); }}>
+                            JOIN LOBBY
+                        </JoinButton>
+                    ) : (
+                        isCaptain ? (
+                            <JoinButton onClick={handleJoinClick} disabled={isJoining} style={{ opacity: isJoining ? 0.5 : 1 }}>
+                                {isJoining ? 'CREATING...' : 'CREATE LOBBY'}
+                            </JoinButton>
+                        ) : (
+                            <JoinButton disabled style={{ opacity: 0.5, cursor: 'not-allowed', borderColor: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.4)', boxShadow: 'none' }}>
+                                WAITING FOR CAPTAIN...
+                            </JoinButton>
+                        )
+                    )}
+                </>
             )}
 
             {isLive && (
