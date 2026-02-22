@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
+import { RefreshCw } from 'lucide-react';
 // @ts-ignore
 import { SingleEliminationBracket, Match, SVGViewer, createTheme } from '@g-loot/react-tournament-brackets';
 import { StyleSheetManager } from 'styled-components';
@@ -11,9 +12,10 @@ import { BracketContext } from '../contexts/BracketContext';
 
 interface CustomBracketProps {
     tournamentUrl: string;
+    isModerator?: boolean;
 }
 
-export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl }) => {
+export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isModerator = false }) => {
     const { user } = useAuth();
     const [matches, setMatches] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
@@ -24,6 +26,148 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl }) =
     
     // Phase 33: Registration Map
     const [rosterMap, setRosterMap] = useState<Record<string, string>>({});
+
+    // Phase 39: Drag Panning State (React unmount fix)
+    const containerRef = useRef<HTMLDivElement>(null);
+    const dragState = useRef({
+        isDragging: false,
+        startX: 0,
+        startY: 0,
+        scrollLeft: 0,
+        scrollTop: 0
+    });
+
+    // Phase 41: Zoom refs (kept for future mobile pinch support)
+    const svgRef = useRef<SVGSVGElement>(null);
+    const zoomState = useRef(1);
+    const lastPinchDistance = useRef<number | null>(null);
+
+    const handleMouseDown = (e: React.MouseEvent) => {
+        if (!containerRef.current) return;
+        dragState.current = {
+            isDragging: true,
+            startX: e.pageX - containerRef.current.offsetLeft,
+            startY: e.pageY - containerRef.current.offsetTop,
+            scrollLeft: containerRef.current.scrollLeft,
+            scrollTop: containerRef.current.scrollTop
+        };
+        containerRef.current.style.cursor = 'grabbing';
+    };
+
+    const handleMouseLeave = () => {
+        dragState.current.isDragging = false;
+        lastPinchDistance.current = null;
+        if (containerRef.current) containerRef.current.style.cursor = 'grab';
+    };
+
+    const handleMouseUp = () => {
+        dragState.current.isDragging = false;
+        lastPinchDistance.current = null;
+        if (containerRef.current) containerRef.current.style.cursor = 'grab';
+    };
+
+    const handleMouseMove = (e: React.MouseEvent) => {
+        if (!dragState.current.isDragging || !containerRef.current) return;
+        e.preventDefault();
+        
+        const x = e.pageX - containerRef.current.offsetLeft;
+        const y = e.pageY - containerRef.current.offsetTop;
+        const walkX = (x - dragState.current.startX) * 1; // 1:1 pan speed mapping
+        const walkY = (y - dragState.current.startY) * 1;
+        
+        containerRef.current.scrollLeft = dragState.current.scrollLeft - walkX;
+        containerRef.current.scrollTop = dragState.current.scrollTop - walkY;
+    };
+
+    // Phase 41: Native Event Listeners for smooth scaling without React State lag
+    useEffect(() => {
+        const container = containerRef.current;
+        if (!container) return;
+
+        const handleWheel = (e: WheelEvent) => {
+            if (e.shiftKey) { // Only zoom if holding shift (prevents interrupting normal scrolling elsewhere if present)
+                e.preventDefault();
+                const delta = e.deltaY * -0.001;
+                const newZoom = Math.min(Math.max(0.2, zoomState.current + delta), 3); // Bound between 20% and 300%
+                zoomState.current = newZoom;
+                
+                if (svgRef.current) {
+                    svgRef.current.style.transform = `scale(${newZoom})`;
+                    svgRef.current.style.transformOrigin = '0 0';
+                }
+            }
+        };
+
+        const handleTouchStart = (e: TouchEvent) => {
+            if (e.touches.length === 2) {
+                // Two fingers = zoom start
+                const t1 = e.touches[0];
+                const t2 = e.touches[1];
+                lastPinchDistance.current = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+            } else if (e.touches.length === 1 && containerRef.current) {
+                // One finger = pan start
+                const t = e.touches[0];
+                dragState.current = {
+                    isDragging: true,
+                    startX: t.clientX - containerRef.current.offsetLeft,
+                    startY: t.clientY - containerRef.current.offsetTop,
+                    scrollLeft: containerRef.current.scrollLeft,
+                    scrollTop: containerRef.current.scrollTop
+                };
+            }
+        };
+
+        const handleTouchMove = (e: TouchEvent) => {
+            if (e.touches.length === 2 && lastPinchDistance.current !== null) {
+                // Handle Mobile Pinch Zoom
+                e.preventDefault(); // Stop screen from zooming
+                const t1 = e.touches[0];
+                const t2 = e.touches[1];
+                const currentDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+                
+                const delta = (currentDist - lastPinchDistance.current) * 0.005;
+                const newZoom = Math.min(Math.max(0.2, zoomState.current + delta), 3);
+                
+                zoomState.current = newZoom;
+                lastPinchDistance.current = currentDist;
+
+                if (svgRef.current) {
+                    svgRef.current.style.transform = `scale(${newZoom})`;
+                    svgRef.current.style.transformOrigin = '0 0';
+                }
+            } else if (e.touches.length === 1 && dragState.current.isDragging && containerRef.current) {
+                // Handle Mobile Panning
+                e.preventDefault(); // Stop vertical scroll bounce
+                const t = e.touches[0];
+                const x = t.clientX - containerRef.current.offsetLeft;
+                const y = t.clientY - containerRef.current.offsetTop;
+                const walkX = x - dragState.current.startX;
+                const walkY = y - dragState.current.startY;
+                
+                containerRef.current.scrollLeft = dragState.current.scrollLeft - walkX;
+                containerRef.current.scrollTop = dragState.current.scrollTop - walkY;
+            }
+        };
+
+        const handleTouchEnd = () => {
+            lastPinchDistance.current = null;
+            dragState.current.isDragging = false;
+        };
+
+        container.addEventListener('wheel', handleWheel, { passive: false });
+        container.addEventListener('touchstart', handleTouchStart, { passive: false });
+        container.addEventListener('touchmove', handleTouchMove, { passive: false });
+        container.addEventListener('touchend', handleTouchEnd);
+        container.addEventListener('touchcancel', handleTouchEnd);
+
+        return () => {
+            container.removeEventListener('wheel', handleWheel);
+            container.removeEventListener('touchstart', handleTouchStart);
+            container.removeEventListener('touchmove', handleTouchMove);
+            container.removeEventListener('touchend', handleTouchEnd);
+            container.removeEventListener('touchcancel', handleTouchEnd);
+        };
+    }, []);
 
     useEffect(() => {
         const fetchUserChallongeId = async () => {
@@ -102,58 +246,72 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl }) =
         };
     }, []);
 
-    useEffect(() => {
-        const loadBracket = async () => {
-            if (!tournamentUrl) return;
-            setLoading(true);
-            try {
-                // Fetch all matches
-                const timestamp = new Date().getTime();
-                const endpoint = `/tournaments/${tournamentUrl}/matches.json?_=${timestamp}`;
-                
-                const matchesPromise = supabase.functions.invoke('challonge-proxy', {
-                    body: { endpoint, method: 'GET' }
-                }).then(({ data, error }) => {
-                    if (error) throw new Error(`Edge Function Error: ${error.message}`);
-                    return data;
-                });
+    const [isRefreshing, setIsRefreshing] = useState(false);
 
-                const [matchesRes, participantsData] = await Promise.all([
-                    matchesPromise,
-                    fetchParticipants(tournamentUrl)
-                ]);
-                
-                // Fetch the junction registrations separately since tournament_id is not directly the url
-                const { data: tData } = await supabase.from('tournaments')
-                    .select('id')
-                    .eq('challonge_url', tournamentUrl)
-                    .single();
-                
-                if (tData) {
-                    const { data: regs } = await supabase.from('tournament_registrations')
-                        .select('challonge_participant_id, roster_id')
-                        .eq('tournament_id', tData.id);
-                        
-                    if (regs) {
-                        const rMap: Record<string, string> = {};
-                        regs.forEach(r => {
-                            rMap[r.challonge_participant_id] = r.roster_id;
-                        });
-                        setRosterMap(rMap);
-                    }
+    const loadBracket = async () => {
+        if (!tournamentUrl) return;
+        setLoading(true);
+        try {
+            const timestamp = new Date().getTime();
+            const endpoint = `/tournaments/${tournamentUrl}/matches.json?_=${timestamp}`;
+            
+            const matchesPromise = supabase.functions.invoke('challonge-proxy', {
+                body: { endpoint, method: 'GET' }
+            }).then(({ data, error }) => {
+                if (error) throw new Error(`Edge Function Error: ${error.message}`);
+                return data;
+            });
+
+            const [matchesRes, participantsData] = await Promise.all([
+                matchesPromise,
+                fetchParticipants(tournamentUrl)
+            ]);
+            
+            let nameMap: Record<string, string> = {};
+            
+            const { data: tData } = await supabase.from('tournaments')
+                .select('id')
+                .eq('challonge_url', tournamentUrl)
+                .single();
+            
+            if (tData) {
+                const { data: regs } = await supabase.from('tournament_registrations')
+                    .select('challonge_participant_id, roster_id, rosters(name)')
+                    .eq('tournament_id', tData.id);
+                    
+                if (regs) {
+                    const rMap: Record<string, string> = {};
+                    const nMap: Record<string, string> = {};
+                    regs.forEach(r => {
+                        rMap[r.challonge_participant_id] = r.roster_id;
+                        const rosterData = r.rosters as any;
+                        if (rosterData && rosterData.name) {
+                            nMap[r.challonge_participant_id] = rosterData.name;
+                        }
+                    });
+                    setRosterMap(rMap);
+                    nameMap = nMap;
                 }
-
-                const transformed = transformChallongeData(matchesRes, participantsData);
-                setMatches(transformed);
-                setError(null);
-            } catch (err: any) {
-                console.error("Bracket Load Error:", err);
-                setError(err.message);
-            } finally {
-                setLoading(false);
             }
-        };
 
+            const transformed = transformChallongeData(matchesRes, participantsData, nameMap);
+            setMatches(transformed);
+            setError(null);
+        } catch (err: any) {
+            console.error("Bracket Load Error:", err);
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleRefreshBracket = async () => {
+        setIsRefreshing(true);
+        await loadBracket();
+        setIsRefreshing(false);
+    };
+
+    useEffect(() => {
         loadBracket();
     }, [tournamentUrl]);
 
@@ -205,14 +363,24 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl }) =
     });
 
     return (
-        <div className="w-full h-full overflow-hidden bg-[#050b14] rounded-2xl border border-white/5 shadow-2xl">
+        <div className="w-full h-full bg-[#050b14] rounded-2xl border border-white/5 shadow-2xl">
+            {/* CSS to hide scrollbars while keeping scroll functionality */}
+            <style>{`
+                .bracket-scroll-container {
+                    scrollbar-width: none; /* Firefox */
+                    -ms-overflow-style: none; /* IE/Edge */
+                }
+                .bracket-scroll-container::-webkit-scrollbar {
+                    display: none; /* Chrome/Safari/Opera */
+                }
+            `}</style>
             <StyleSheetManager shouldForwardProp={(prop) => !['won', 'hovered', 'highlighted', 'bottomHovered', 'topHovered'].includes(prop)}>
                 <BracketContext.Provider value={{ 
                     currentUserChallongeId: userChallongeId,
                     isCaptain,
                     tournamentUrl,
                     activeMatches,
-                    rosterMap // Inject Map
+                    rosterMap
                 }}>
                     <SingleEliminationBracket
                         matches={matches}
@@ -227,31 +395,33 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl }) =
                                     marginBottom: 20 
                                 },
                                 connectorColor: 'rgba(255,255,255,0.1)',
-                                connectorColorHighlight: '#ef4444', // Red glow
+                                connectorColorHighlight: '#ef4444',
                                 width: 440,
                                 matchWidth: 440,
-                                boxHeight: 180,
-                                canvasPadding: 50
+                                boxHeight: 260,
+                                canvasPadding: 80
                             }
                         }}
-                        svgWrapper={({ children, bracketWidth, bracketHeight, ...props }: React.PropsWithChildren<any>) => {
-                            // Phase 34: Add an extra +100 to the calculated width to prevent the final round from being clipped.
-                            const finalWidth = (bracketWidth || props.width || 1200) + 150;
-                            const finalHeight = (bracketHeight || props.height || 800) + 150;
-                            
+                        svgWrapper={({ children }: React.PropsWithChildren<any>) => {
                             return (
-                                <div className="w-full min-h-[70vh] overflow-x-auto overflow-y-auto cursor-grab custom-scrollbar relative">
-                                    <svg 
-                                        width={finalWidth} 
-                                        height={finalHeight} 
-                                        viewBox={`0 0 ${finalWidth} ${finalHeight}`}
-                                        style={{ background: 'transparent' }}
-                                        {...props}
-                                    >
-                                        <g transform="translate(20, 20)">
-                                            {children}
-                                        </g>
-                                    </svg>
+                                <div 
+                                    ref={containerRef}
+                                    onMouseDown={handleMouseDown}
+                                    onMouseLeave={handleMouseLeave}
+                                    onMouseUp={handleMouseUp}
+                                    onMouseMove={handleMouseMove}
+                                    className="bracket-scroll-container w-full h-[85vh] overflow-auto bg-[#050b14] relative cursor-grab active:cursor-grabbing"
+                                >
+                                    {children}
+                                    {isModerator && (
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); handleRefreshBracket(); }}
+                                            className="absolute top-3 right-3 z-50 p-2 bg-black/60 border border-white/10 hover:border-white/30 rounded-lg text-slate-400 hover:text-white transition-all backdrop-blur-sm"
+                                            title="Refresh Bracket"
+                                        >
+                                            <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} />
+                                        </button>
+                                    )}
                                 </div>
                             );
                         }}

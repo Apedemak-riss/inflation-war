@@ -23,6 +23,9 @@ export const TournamentHub: React.FC = () => {
     const [formTitle, setFormTitle] = useState('');
     const [formChallongeUrl, setFormChallongeUrl] = useState('');
     const [formPrizePool, setFormPrizePool] = useState('');
+    const [formPrize1st, setFormPrize1st] = useState('');
+    const [formPrize2nd, setFormPrize2nd] = useState('');
+    const [formPrize3rd, setFormPrize3rd] = useState('');
     const [formStatus, setFormStatus] = useState('upcoming');
     const [formRegistrationUrl, setFormRegistrationUrl] = useState('');
     
@@ -110,6 +113,9 @@ export const TournamentHub: React.FC = () => {
                 title: formTitle,
                 challonge_url: formChallongeUrl,
                 prize_pool: formPrizePool || null,
+                prize_1st: formPrize1st || null,
+                prize_2nd: formPrize2nd || null,
+                prize_3rd: formPrize3rd || null,
                 status: formStatus,
                 registration_url: formRegistrationUrl || null
             }]);
@@ -121,6 +127,9 @@ export const TournamentHub: React.FC = () => {
             setFormTitle('');
             setFormChallongeUrl('');
             setFormPrizePool('');
+            setFormPrize1st('');
+            setFormPrize2nd('');
+            setFormPrize3rd('');
             setFormStatus('upcoming');
             setFormRegistrationUrl('');
             setFormTournamentType('single elimination');
@@ -378,15 +387,29 @@ export const TournamentHub: React.FC = () => {
 
                                 <div>
                                     <label className="block text-slate-400 text-xs font-bold tracking-widest mb-2 flex items-center gap-1">
-                                        <DollarSign size={12} /> PRIZE POOL (OPTIONAL)
+                                        <DollarSign size={12} /> TOTAL PRIZE POOL (OPTIONAL)
                                     </label>
                                     <input 
                                         type="text" 
                                         value={formPrizePool}
                                         onChange={(e) => setFormPrizePool(e.target.value)}
                                         placeholder="e.g. $500 + Exclusive Roles"
-                                        className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50 focus:bg-emerald-500/5 transition-colors"
+                                        className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50 focus:bg-emerald-500/5 transition-colors mb-3"
                                     />
+                                    <div className="grid grid-cols-3 gap-3">
+                                        <div>
+                                            <label className="block text-slate-400 text-[10px] font-bold tracking-widest mb-1 text-center">1ST PLACE</label>
+                                            <input type="text" value={formPrize1st} onChange={(e) => setFormPrize1st(e.target.value)} placeholder="e.g. $300" className="w-full bg-black/50 border border-yellow-500/30 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-yellow-500/80 text-center transition-colors focus:bg-yellow-500/5" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-slate-400 text-[10px] font-bold tracking-widest mb-1 text-center">2ND PLACE</label>
+                                            <input type="text" value={formPrize2nd} onChange={(e) => setFormPrize2nd(e.target.value)} placeholder="e.g. $150" className="w-full bg-black/50 border border-slate-400/30 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-slate-400/80 text-center transition-colors focus:bg-slate-400/5" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-slate-400 text-[10px] font-bold tracking-widest mb-1 text-center">3RD PLACE</label>
+                                            <input type="text" value={formPrize3rd} onChange={(e) => setFormPrize3rd(e.target.value)} placeholder="e.g. $50" className="w-full bg-black/50 border border-amber-700/30 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-700/80 text-center transition-colors focus:bg-amber-700/5" />
+                                        </div>
+                                    </div>
                                 </div>
 
                                 <div>

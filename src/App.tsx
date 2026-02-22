@@ -253,7 +253,9 @@ function AppContent() {
   const [openMatches, setOpenMatches] = useState<any[]>([]);
   const [challongeMatchId, setChallongeMatchId] = useState<string | null>(null);
   const [isFetchingMatches, setIsFetchingMatches] = useState(false);
-  const [challongeParticipantMap, setChallongeParticipantMap] = useState<Record<string, string>>({});
+  // Map Participant ID -> Native Roster UUID correctly
+  const [participantToRosterMap, setParticipantToRosterMap] = useState<Record<string, string>>({});
+  const [challongeParticipantMap, setChallongeParticipantMap] = useState<Record<string, string>>({}); // Restored back for fallback display name resolution
 
   const [teamBudget, setTeamBudget] = useState(100);
   const [dbItems, setDbItems] = useState<Item[]>([]);
@@ -309,17 +311,44 @@ function AppContent() {
                     fetchParticipants(tournamentUrl.trim())
                 ]);
                 
+                const { data: tData } = await supabase.from('tournaments')
+                    .select('id')
+                    .eq('challonge_url', tournamentUrl.trim())
+                    .limit(1)
+                    .maybeSingle();
+
+                let dbNameMap: Record<string, string> = {};
+                let dbRosterMap: Record<string, string> = {};
+                if (tData) {
+                    const { data: regs } = await supabase.from('tournament_registrations')
+                        .select('challonge_participant_id, roster_id, rosters(name)')
+                        .eq('tournament_id', tData.id);
+                        
+                    if (regs) {
+                        regs.forEach(r => {
+                            dbRosterMap[r.challonge_participant_id] = r.roster_id;
+                            const rData = r.rosters as any;
+                            if (rData && rData.name) {
+                                dbNameMap[r.challonge_participant_id] = rData.name;
+                            }
+                        });
+                    }
+                }
+                
+                setParticipantToRosterMap(dbRosterMap);
+
                 const pMap: Record<string, string> = {};
                 if (participants && Array.isArray(participants)) {
                     participants.forEach((p: any) => {
                         if (p.participant && p.participant.id) {
-                            const name = p.participant.name || p.participant.display_name || p.participant.username || `Participant ${p.participant.id}`;
-                            pMap[p.participant.id.toString()] = name;
+                            const defaultName = p.participant.name || p.participant.display_name || p.participant.username || `Participant ${p.participant.id}`;
+                            const nativeName = dbNameMap[p.participant.id.toString()] || defaultName;
+                            pMap[p.participant.id.toString()] = nativeName;
                             
                             // Also map group_player_ids if they exist (used in some bracket types)
                             if (p.participant.group_player_ids && Array.isArray(p.participant.group_player_ids)) {
                                 p.participant.group_player_ids.forEach((gId: number) => {
-                                    pMap[gId.toString()] = name;
+                                    pMap[gId.toString()] = nativeName;
                                 });
                             }
                         }
@@ -480,7 +509,22 @@ function AppContent() {
         .limit(10);
         
     if (lobbiesData) {
-        setActiveLobbies(lobbiesData);
+        // Enhance lobbies with tournament names if they represent an official match
+        const enrichedLobbies = await Promise.all(lobbiesData.map(async (lobby) => {
+            let tournamentName = null;
+            if (lobby.challonge_match_id) {
+                 const rosterId = lobby.teams?.[0]?.roster_id || lobby.teams?.[1]?.roster_id;
+                 if (rosterId) {
+                     const { data: tr } = await supabase.from('tournament_registrations').select('tournament_id, tournaments(name)').eq('roster_id', rosterId).limit(1).maybeSingle();
+                     const tData = tr?.tournaments as any;
+                     if (tData) {
+                         tournamentName = Array.isArray(tData) ? tData[0]?.name : tData.name;
+                     }
+                 }
+            }
+            return { ...lobby, tournamentName };
+        }));
+        setActiveLobbies(enrichedLobbies);
     } else if (lobbiesError) {
         console.error("Error fetching active lobbies:", lobbiesError);
     }
@@ -970,11 +1014,25 @@ function AppContent() {
                   }
               }
               
-              const { data: wRoster } = await supabase.from('rosters').select('challonge_participant_id').eq('id', winnerTeam.roster_id).single();
-              const wChallongeId = wRoster?.challonge_participant_id;
+              // Query Database correctly mapping tournament_registrations matrix
+              let wChallongeId: string | null = null;
+              
+              const { data: tData } = await supabase.from('tournaments')
+                  .select('id')
+                  .eq('challonge_url', tournamentUrl)
+                  .single();
+                  
+              if (tData) {
+                  const { data: reg } = await supabase.from('tournament_registrations')
+                      .select('challonge_participant_id')
+                      .eq('tournament_id', tData.id)
+                      .eq('roster_id', winnerTeam.roster_id)
+                      .single();
+                  wChallongeId = reg?.challonge_participant_id;
+              }
               
               if (!wChallongeId) {
-                  alert(`Cannot advance bracket: Winning team (${winnerTeam.name}) has no linked Challonge ID.`);
+                  alert(`Cannot advance bracket: Winning team (${winnerTeam.name}) has no linked Challonge ID in this tournament registration pool.`);
                   setModLoading(false);
                   return;
               }
@@ -984,7 +1042,7 @@ function AppContent() {
               const scoresCsv = `${teamAScore}-${teamBScore}`;
               
               const { reportMatchScore } = await import('./services/challongeService');
-              await reportMatchScore(tournamentUrl, foundLobby.challonge_match_id, wChallongeId.toString(), scoresCsv);
+              await reportMatchScore(tournamentUrl, foundLobby.challonge_match_id, wChallongeId, scoresCsv);
           }
           
           const { error } = await supabase.rpc('end_match_secure', { p_lobby_id: foundLobby.id, p_team_scores: endMatchScores });
@@ -997,55 +1055,6 @@ function AppContent() {
       } finally {
           setModLoading(false);
       }
-  };
-
-  const handleSyncChallonge = async () => {
-    const tournamentUrl = prompt("Enter Challonge Tournament URL (e.g. cocelitetest1):");
-    if (!tournamentUrl) return;
-
-    try {
-        setModLoading(true);
-        const { fetchParticipants } = await import('./services/challongeService');
-        const data = await fetchParticipants(tournamentUrl);
-        
-        const { data: rosters, error } = await supabase.from('rosters').select('*');
-        if (error) throw error;
-        
-        let syncCount = 0;
-        console.log(`[Sync] Starting sync for ${data.length} participants...`, data);
-        for (const p of data) {
-            const pName = p.participant.name || p.participant.display_name || p.participant.username || '';
-            const cleanChallongeName = pName.toLowerCase().trim();
-            
-            const match = rosters?.find((r: any) => 
-                r.name.toLowerCase().trim() === cleanChallongeName || 
-                r.tag.toLowerCase().trim() === cleanChallongeName
-            );
-            
-            if (match) {
-                console.log(`[Sync] Matched: '${pName}' to DB Roster: '${match.name}'`);
-                
-                const { error: updateErr } = await supabase.rpc('set_challonge_participant', {
-                    p_roster_id: match.id,
-                    p_challonge_id: p.participant.id.toString()
-                });
-                    
-                if (updateErr) {
-                    console.error(`[Sync] \u274c SUPABASE RPC ERROR for ${match.name}:`, updateErr.message, updateErr.details);
-                } else {
-                    console.log(`[Sync] \u2705 Saved to DB via RPC: ${match.name} -> ${p.participant.id}`);
-                    syncCount++;
-                }
-            } else {
-                console.warn(`[Sync] FAILED TO MATCH: '${pName}'`);
-            }
-        }
-        alert(`Tournament Sync Complete! Synced ${syncCount} participants. Check console for details.`);
-    } catch (err: any) {
-        alert("Sync error: " + err.message);
-    } finally {
-        setModLoading(false);
-    }
   };
 
   const handleNuke = async () => { 
@@ -1727,10 +1736,7 @@ function AppContent() {
                                 <Settings size={18} className="group-hover:rotate-90 transition-transform duration-500"/> <span>{showSandbox ? 'Close Sandbox' : 'Economy Sandbox'}</span>
                             </button>
                         )}
-                        <button onClick={handleSyncChallonge} className="w-full md:w-auto group bg-purple-600 hover:bg-purple-500 px-6 py-3 md:px-8 md:py-4 rounded-xl font-black flex items-center justify-center gap-3 text-xs tracking-widest uppercase transition-all shadow-[0_0_30px_rgba(168,85,247,0.4)] hover:shadow-[0_0_50px_rgba(168,85,247,0.6)] hover:-translate-y-1 active:translate-y-0 relative overflow-hidden">
-                            <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
-                            <RefreshCw size={18} className="relative z-10 group-hover:animate-spin-slow"/> <span className="relative z-10">Sync Tournament IDs</span>
-                        </button>
+
                         <button onClick={handleNuke} className="w-full md:w-auto group bg-red-600 hover:bg-red-500 px-6 py-3 md:px-8 md:py-4 rounded-xl font-black flex items-center justify-center gap-3 text-xs tracking-widest uppercase transition-all shadow-[0_0_30px_rgba(239,68,68,0.4)] hover:shadow-[0_0_50px_rgba(239,68,68,0.6)] hover:-translate-y-1 active:translate-y-0 relative overflow-hidden">
                             <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
                             <Trash2 size={18} className="relative z-10"/> <span className="relative z-10">Execute Global Purge</span>
@@ -2185,10 +2191,13 @@ function AppContent() {
                                                     if (m) {
                                                         const p1Id = m.match.player1_id?.toString();
                                                         const p2Id = m.match.player2_id?.toString();
-                                                        const roster1 = allRosters.find(r => (r as any).challonge_participant_id === p1Id);
-                                                        const roster2 = allRosters.find(r => (r as any).challonge_participant_id === p2Id);
-                                                        if (roster1) setSelectedTeamA(roster1.id);
-                                                        if (roster2) setSelectedTeamB(roster2.id);
+                                                        
+                                                        // Phase 39: Map native strings via interpolation table perfectly
+                                                        const roster1Id = participantToRosterMap[p1Id];
+                                                        const roster2Id = participantToRosterMap[p2Id];
+                                                        
+                                                        if (roster1Id) setSelectedTeamA(roster1Id);
+                                                        if (roster2Id) setSelectedTeamB(roster2Id);
                                                     }
                                                 }
                                             }}
@@ -2205,8 +2214,13 @@ function AppContent() {
                                                     {openMatches.map((m: any) => {
                                                         const p1Id = m.match.player1_id?.toString();
                                                         const p2Id = m.match.player2_id?.toString();
-                                                        const roster1 = allRosters.find(r => r.challonge_participant_id === p1Id);
-                                                        const roster2 = allRosters.find(r => r.challonge_participant_id === p2Id);
+                                                        
+                                                        // Look up Roster IDs specifically from the synced mapping
+                                                        const roster1Id = participantToRosterMap[p1Id];
+                                                        const roster2Id = participantToRosterMap[p2Id];
+                                                        
+                                                        const roster1 = roster1Id ? allRosters.find(r => r.id === roster1Id) : undefined;
+                                                        const roster2 = roster2Id ? allRosters.find(r => r.id === roster2Id) : undefined;
                                                         
                                                         const name1 = roster1 ? roster1.name : (challongeParticipantMap[p1Id] || `Participant ${p1Id || 'TBD'}`);
                                                         const name2 = roster2 ? roster2.name : (challongeParticipantMap[p2Id] || `Participant ${p2Id || 'TBD'}`);
@@ -2224,13 +2238,23 @@ function AppContent() {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2">Team A Roster</label>
-                                    <select value={selectedTeamA || ''} onChange={e => setSelectedTeamA(e.target.value)} className="w-full bg-[#050b14] border border-blue-500/30 rounded-xl p-4 font-bold outline-none text-blue-100 focus:border-blue-500 transition-colors">
+                                    <select 
+                                        value={selectedTeamA || ''} 
+                                        onChange={e => setSelectedTeamA(e.target.value)} 
+                                        className="w-full bg-[#050b14] border border-blue-500/30 rounded-xl p-4 font-bold outline-none text-blue-100 focus:border-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                        disabled={!!challongeMatchId}
+                                    >
                                         {allRosters.map(r => <option key={r.id} value={r.id}>[{r.tag}] {r.name}</option>)}
                                     </select>
                                 </div>
                                 <div>
                                     <label className="block text-[10px] font-black text-purple-400 uppercase tracking-widest mb-2">Team B Roster</label>
-                                    <select value={selectedTeamB || ''} onChange={e => setSelectedTeamB(e.target.value)} className="w-full bg-[#050b14] border border-purple-500/30 rounded-xl p-4 font-bold outline-none text-purple-100 focus:border-purple-500 transition-colors">
+                                    <select 
+                                        value={selectedTeamB || ''} 
+                                        onChange={e => setSelectedTeamB(e.target.value)} 
+                                        className="w-full bg-[#050b14] border border-purple-500/30 rounded-xl p-4 font-bold outline-none text-purple-100 focus:border-purple-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                        disabled={!!challongeMatchId}
+                                    >
                                         {allRosters.map(r => <option key={r.id} value={r.id}>[{r.tag}] {r.name}</option>)}
                                     </select>
                                 </div>
@@ -2261,9 +2285,18 @@ function AppContent() {
                                     <div className="flex flex-col">
                                         <div className="flex items-center gap-2">
                                             <span className="text-white font-black text-lg tracking-tight">{lobby.code}</span>
-                                            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest bg-white/5 py-0.5 px-2 rounded-full">
+                                            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest bg-white/5 py-0.5 px-2 rounded-full hidden sm:inline-block">
                                                 {formatDistanceToNow(new Date(lobby.created_at), { addSuffix: true })}
                                             </span>
+                                            {lobby.challonge_match_id ? (
+                                                <span className="text-[9px] font-black tracking-widest uppercase px-2 py-0.5 rounded-full bg-red-500/20 text-red-500 border border-red-500/30 flex items-center gap-1 shadow-sm">
+                                                    <Trophy size={10} /> {lobby.tournamentName || "TOURNAMENT MATCH"}
+                                                </span>
+                                            ) : (
+                                                <span className="text-[9px] font-black tracking-widest uppercase px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center gap-1 shadow-sm">
+                                                    <Sword size={10} /> CUSTOM MATCH
+                                                </span>
+                                            )}
                                         </div>
                                         <div className="text-xs font-bold text-slate-400 mt-1 flex items-center gap-2">
                                             {lobby.teams?.[0] ? (

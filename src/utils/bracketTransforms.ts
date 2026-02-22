@@ -1,12 +1,16 @@
-export const transformChallongeData = (matches: any[], participants: any[]) => {
+export const transformChallongeData = (matches: any[], participants: any[], nameMap?: Record<string, string>) => {
     if (!matches || !participants) return [];
 
     // Map participants for quick lookup by their Challonge Participant ID and Group Participant IDs
     const pMap: Record<string, any> = {};
     participants.forEach(p => {
         if (p.participant && p.participant.id) {
-            const name = p.participant.name || p.participant.display_name || p.participant.username || `Participant ${p.participant.id}`;
-            const pData = { id: p.participant.id.toString(), name };
+            // Phase 35: Intercept Challonge's default tag with the natively synced database `rosters(name)`
+            const idStr = p.participant.id.toString();
+            const dbNameOverride = nameMap ? nameMap[idStr] : undefined;
+            
+            const name = dbNameOverride || p.participant.name || p.participant.display_name || p.participant.username || `Participant ${p.participant.id}`;
+            const pData = { id: idStr, name };
             pMap[p.participant.id.toString()] = pData;
             
             if (p.participant.group_player_ids && Array.isArray(p.participant.group_player_ids)) {

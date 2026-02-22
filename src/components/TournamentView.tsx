@@ -6,6 +6,63 @@ import { CustomBracket } from './CustomBracket';
 import { ArrowLeft, Trophy, Crown, X, AlertTriangle, RotateCcw, Settings, Users, Terminal, MonitorPlay, ChevronRight, RefreshCw, Loader2, Trash2 } from 'lucide-react';
 import { fetchParticipants, finalizeTournament, startTournament, fetchOpenMatches } from '../services/challongeService';
 
+const TournamentPodium = ({ podiumData, tournament }: { podiumData: any[], tournament: any }) => {
+    const renderRank = (rank: number, label: string, colorClass: string, iconColor: string, prizeStr: string | null) => {
+        const teams = podiumData.filter(p => p.rank === rank);
+        if (teams.length === 0) return null;
+        
+        const isFirst = rank === 1;
+        
+        return (
+            <div className={`flex flex-col items-center gap-3 p-6 rounded-3xl bg-black/40 border ${colorClass} backdrop-blur-md shadow-2xl flex-1 w-full max-w-[320px] relative overflow-hidden group hover:scale-[1.02] transition-transform`}>
+                <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 mix-blend-overlay pointer-events-none"></div>
+                <div className={`p-4 rounded-full bg-black/80 border ${colorClass} relative z-10 shadow-inner`}>
+                    <Trophy size={isFirst ? 56 : 40} className={`${iconColor} ${isFirst ? 'drop-shadow-[0_0_15px_rgba(234,179,8,0.8)]' : ''}`} />
+                </div>
+                <h3 className={`font-black tracking-widest uppercase text-sm md:text-base ${iconColor} relative z-10`}>{label}</h3>
+                
+                <div className="flex flex-col gap-3 w-full mt-2 relative z-10">
+                    {teams.map(team => (
+                        <div key={team.id} className="bg-[#050b14]/80 border border-white/10 px-5 py-4 rounded-2xl flex flex-col items-center text-center shadow-lg">
+                            <span className={`font-black tracking-wider ${isFirst ? 'text-lg text-white' : 'text-base text-slate-200'}`}>{team.name}</span>
+                            {team.tag && <span className="text-slate-500 font-bold text-xs mt-1">[{team.tag}]</span>}
+                        </div>
+                    ))}
+                </div>
+                
+                {prizeStr && (
+                    <div className="mt-4 px-5 py-3 bg-emerald-950/40 border border-emerald-500/40 rounded-xl text-emerald-400 font-black tracking-widest text-sm text-center w-full relative z-10 shadow-[0_0_20px_rgba(52,211,153,0.15)] flex items-center justify-center gap-2">
+                        <Crown size={16} /> {prizeStr}
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    return (
+        <div className="w-full flex flex-col items-center mt-2 mb-16 animate-slide-up">
+            <div className="flex items-center gap-4 mb-10">
+                <div className="h-[2px] w-12 md:w-32 bg-gradient-to-r from-transparent to-yellow-500/50"></div>
+                <h2 className="text-2xl md:text-4xl font-black text-white tracking-[0.2em] uppercase text-center flex items-center gap-3 drop-shadow-2xl">
+                    <Crown className="text-yellow-500" size={32} /> TOURNAMENT PODIUM <Crown className="text-yellow-500" size={32} />
+                </h2>
+                <div className="h-[2px] w-12 md:w-32 bg-gradient-to-l from-transparent to-yellow-500/50"></div>
+            </div>
+            <div className="flex flex-col md:flex-row items-stretch md:items-end justify-center w-full gap-6 md:gap-8 px-4">
+                <div className="order-2 md:order-1 flex justify-center w-full md:w-auto">
+                    {renderRank(2, "Silver Medalist", "border-slate-300/60 bg-gradient-to-b from-slate-400/10 to-transparent", "text-slate-300", tournament?.prize_2nd)}
+                </div>
+                <div className="order-1 md:order-2 flex justify-center w-full md:w-auto mb-0 md:mb-8 z-10">
+                    {renderRank(1, "Grand Champion", "border-yellow-400/80 bg-gradient-to-b from-yellow-500/20 to-transparent shadow-[0_0_50px_rgba(234,179,8,0.2)]", "text-yellow-400", tournament?.prize_1st)}
+                </div>
+                <div className="order-3 md:order-3 flex justify-center w-full md:w-auto">
+                    {renderRank(3, "Bronze Medalist", "border-amber-700/60 bg-gradient-to-b from-amber-700/10 to-transparent", "text-amber-600", tournament?.prize_3rd)}
+                </div>
+            </div>
+        </div>
+    );
+};
+
 export const TournamentView: React.FC = () => {
     const { challongeUrl } = useParams<{ challongeUrl: string }>();
     const navigate = useNavigate();
@@ -14,6 +71,7 @@ export const TournamentView: React.FC = () => {
     const [profile, setProfile] = useState<any>(null);
     const [tournament, setTournament] = useState<any>(null);
     const [loading, setLoading] = useState(true);
+    const [podiumData, setPodiumData] = useState<any[]>([]);
     
     // Moderator feature state
     const [confirmText, setConfirmText] = useState('');
@@ -69,6 +127,29 @@ export const TournamentView: React.FC = () => {
         const { data } = await supabase.from('tournaments').select('*').eq('challonge_url', challongeUrl).single();
         if (data) {
             setTournament(data);
+            
+            // Phase 44: Fetch Podium Data if completed
+            if (data.status === 'completed') {
+                try {
+                    const participants = await fetchParticipants(data.challonge_url);
+                    const { data: regs } = await supabase.from('tournament_registrations')
+                        .select('challonge_participant_id, rosters(name,tag)')
+                        .eq('tournament_id', data.id);
+                        
+                    const podium = participants
+                        .filter((p: any) => [1, 2, 3].includes(p.participant.final_rank))
+                        .map((p: any) => {
+                            const reg = regs?.find(r => r.challonge_participant_id === p.participant.id.toString());
+                            const rosterData = reg?.rosters as any;
+                            const name = rosterData?.name || p.participant.name;
+                            const tag = rosterData?.tag || '';
+                            return { rank: p.participant.final_rank, name, tag, id: p.participant.id };
+                        });
+                    setPodiumData(podium);
+                } catch (e) {
+                    console.error("Failed to fetch podium data", e);
+                }
+            }
         }
     };
 
@@ -247,6 +328,11 @@ export const TournamentView: React.FC = () => {
             {/* Content Container */}
             <div className="flex-1 w-full max-w-[1600px] mx-auto flex flex-col relative z-10 animate-fade-in gap-8">
                 
+                {/* 🌟 The New Podium (Phase 44) 🌟 */}
+                {isCompleted && podiumData.length > 0 && (
+                    <TournamentPodium podiumData={podiumData} tournament={tournament} />
+                )}
+
                 {/* 🌟 The Museum Banner 🌟 */}
                 {isCompleted && winnerSnap && (
                     <div className="w-full rounded-2xl overflow-hidden border border-yellow-500/40 bg-gradient-to-br from-yellow-950/80 via-[#1a1400] to-yellow-950/40 shadow-[0_0_50px_rgba(234,179,8,0.15)] relative animate-slide-up">
@@ -283,10 +369,10 @@ export const TournamentView: React.FC = () => {
                 )}
 
                 {/* Embedded Bracket Container */}
-                <div className="w-full h-[850px] rounded-2xl overflow-hidden border border-white/5 shadow-2xl relative bg-[#0a101f]">
+                <div className="w-full min-h-[85vh] rounded-2xl overflow-visible border border-white/5 shadow-2xl relative bg-[#0a101f]">
                     <div className="absolute inset-0 bg-gradient-to-b from-blue-500/5 to-transparent pointer-events-none opacity-50"></div>
-                    <div className="relative z-10 w-full h-full p-4">
-                        <CustomBracket tournamentUrl={tournament.challonge_url} />
+                    <div className="relative z-10 w-full h-full">
+                        <CustomBracket tournamentUrl={tournament.challonge_url} isModerator={profile?.role === 'moderator'} />
                     </div>
                 </div>
 

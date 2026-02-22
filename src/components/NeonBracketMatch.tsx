@@ -5,13 +5,9 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
 const MatchContainer = styled.div`
+  position: relative;
   width: 100%;
   height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-start;
-  padding-top: 40px;
 `;
 
 const pulseGlow = keyframes`
@@ -35,13 +31,17 @@ const LiveDot = styled.div`
 `;
 
 const MatchWrapper = styled.div<{ $isLive?: boolean }>`
-  position: relative;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  width: 100%;
+  width: 90%;
   height: 100px;
-  background: rgba(10, 16, 31, 0.85); /* Darker glassmorphism */
+  background: rgba(10, 16, 31, 0.85);
   backdrop-filter: blur(8px);
   border: 1px solid ${props => props.$isLive ? 'rgba(239, 68, 68, 0.4)' : 'rgba(234, 179, 8, 0.2)'};
   border-radius: 12px;
@@ -52,18 +52,21 @@ const MatchWrapper = styled.div<{ $isLive?: boolean }>`
   transition: all 0.2s ease-in-out;
 
   &:hover {
-    border-color: #FBBF24; /* Tailwind yellow-500 */
+    border-color: #FBBF24;
     background: rgba(15, 23, 42, 0.95);
     box-shadow: 0 0 25px rgba(234, 179, 8, 0.5), inset 0 0 15px rgba(234, 179, 8, 0.2);
   }
 `;
 
 const JoinButton = styled.button`
-  margin-top: 12px;
+  position: absolute;
+  top: calc(50% + 55px);
+  left: 50%;
+  transform: translateX(-50%);
   height: 28px;
   padding: 0 24px;
   background: rgba(16, 24, 35, 0.95);
-  border: 1px solid rgba(56, 189, 248, 0.5); /* Cyan border */
+  border: 1px solid rgba(56, 189, 248, 0.5);
   border-radius: 14px;
   color: #38bdf8;
   font-family: 'Outfit', sans-serif;
@@ -86,11 +89,14 @@ const JoinButton = styled.button`
 `;
 
 const WatchButton = styled.button`
-  margin-top: 8px;
+  position: absolute;
+  top: calc(50% + 90px);
+  left: 50%;
+  transform: translateX(-50%);
   height: 28px;
   padding: 0 24px;
   background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.5); /* Red border */
+  border: 1px solid rgba(239, 68, 68, 0.5);
   border-radius: 14px;
   color: #ef4444;
   font-family: 'Outfit', sans-serif;
