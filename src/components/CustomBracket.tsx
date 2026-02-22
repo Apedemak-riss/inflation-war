@@ -21,6 +21,9 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl }) =
     const [userChallongeId, setUserChallongeId] = useState<string | null>(null);
     const [isCaptain, setIsCaptain] = useState<boolean>(false);
     const [activeMatches, setActiveMatches] = useState<Record<string, string>>({});
+    
+    // Phase 33: Registration Map
+    const [rosterMap, setRosterMap] = useState<Record<string, string>>({});
 
     useEffect(() => {
         const fetchUserChallongeId = async () => {
@@ -28,28 +31,25 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl }) =
                 // 1. Find if the current user is a captain of a roster
                 const { data: captainData, error: captainError } = await supabase
                     .from('rosters')
-                    .select('challonge_participant_id')
+                    .select('id')
                     .eq('captain_id', user.id)
                     .single();
                 
-                if (!captainError && captainData?.challonge_participant_id) {
-                    setUserChallongeId(captainData.challonge_participant_id.toString());
+                if (!captainError && captainData?.id) {
+                    // Note: This variable is named userChallongeId for context compatibility, but it now stores the native Roster ID
+                    setUserChallongeId(captainData.id);
                     setIsCaptain(true);
                 } else {
                     // 2. If not a captain, check if they are a member
                     const { data: memberData, error: memberError } = await supabase
                         .from('roster_members')
-                        .select('rosters(challonge_participant_id)')
+                        .select('roster_id')
                         .eq('user_id', user.id)
                         .single();
                         
-                    if (!memberError && memberData?.rosters) {
-                        const rostersData = memberData.rosters as any;
-                        const challongeId = Array.isArray(rostersData) ? rostersData[0]?.challonge_participant_id : rostersData?.challonge_participant_id;
-                        if (challongeId) {
-                            setUserChallongeId(challongeId.toString());
-                            setIsCaptain(false);
-                        }
+                    if (!memberError && memberData?.roster_id) {
+                        setUserChallongeId(memberData.roster_id);
+                        setIsCaptain(false); // Can't start lobbies but can see matches
                     }
                 }
             }
@@ -107,7 +107,7 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl }) =
             if (!tournamentUrl) return;
             setLoading(true);
             try {
-                // Fetch all matches (not just open)
+                // Fetch all matches
                 const timestamp = new Date().getTime();
                 const endpoint = `/tournaments/${tournamentUrl}/matches.json?_=${timestamp}`;
                 
@@ -123,6 +123,26 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl }) =
                     fetchParticipants(tournamentUrl)
                 ]);
                 
+                // Fetch the junction registrations separately since tournament_id is not directly the url
+                const { data: tData } = await supabase.from('tournaments')
+                    .select('id')
+                    .eq('challonge_url', tournamentUrl)
+                    .single();
+                
+                if (tData) {
+                    const { data: regs } = await supabase.from('tournament_registrations')
+                        .select('challonge_participant_id, roster_id')
+                        .eq('tournament_id', tData.id);
+                        
+                    if (regs) {
+                        const rMap: Record<string, string> = {};
+                        regs.forEach(r => {
+                            rMap[r.challonge_participant_id] = r.roster_id;
+                        });
+                        setRosterMap(rMap);
+                    }
+                }
+
                 const transformed = transformChallongeData(matchesRes, participantsData);
                 setMatches(transformed);
                 setError(null);
@@ -191,7 +211,8 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl }) =
                     currentUserChallongeId: userChallongeId,
                     isCaptain,
                     tournamentUrl,
-                    activeMatches
+                    activeMatches,
+                    rosterMap // Inject Map
                 }}>
                     <SingleEliminationBracket
                         matches={matches}
@@ -213,19 +234,27 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl }) =
                                 canvasPadding: 50
                             }
                         }}
-                        svgWrapper={({ children, bracketWidth, bracketHeight, startAt, ...props }: React.PropsWithChildren<any>) => (
-                            <div className="w-full h-[800px] overflow-auto scrollbar-thin scrollbar-thumb-yellow-500/50 scrollbar-track-transparent">
-                                <svg 
-                                    width={props.width || 1200} 
-                                    height={props.height || 800} 
-                                    viewBox={`0 0 ${props.width || 1200} ${props.height || 800}`}
-                                    style={{ background: 'transparent' }}
-                                    {...props}
-                                >
-                                    {children}
-                                </svg>
-                            </div>
-                        )}
+                        svgWrapper={({ children, bracketWidth, bracketHeight, ...props }: React.PropsWithChildren<any>) => {
+                            // Phase 34: Add an extra +100 to the calculated width to prevent the final round from being clipped.
+                            const finalWidth = (bracketWidth || props.width || 1200) + 150;
+                            const finalHeight = (bracketHeight || props.height || 800) + 150;
+                            
+                            return (
+                                <div className="w-full min-h-[70vh] overflow-x-auto overflow-y-auto cursor-grab custom-scrollbar relative">
+                                    <svg 
+                                        width={finalWidth} 
+                                        height={finalHeight} 
+                                        viewBox={`0 0 ${finalWidth} ${finalHeight}`}
+                                        style={{ background: 'transparent' }}
+                                        {...props}
+                                    >
+                                        <g transform="translate(20, 20)">
+                                            {children}
+                                        </g>
+                                    </svg>
+                                </div>
+                            );
+                        }}
                     />
                 </BracketContext.Provider>
             </StyleSheetManager>

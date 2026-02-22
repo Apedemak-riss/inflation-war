@@ -171,8 +171,8 @@ export const NeonBracketMatch: React.FC<NeonBracketMatchProps> = ({
     topParty,
     bottomParty
 }) => {
-    // Current user's roster ID injected via Context from CustomBracket.tsx
-    const { currentUserChallongeId, isCaptain, activeMatches } = useContext(BracketContext);
+    // Current user context
+    const { currentUserChallongeId, isCaptain, activeMatches, rosterMap } = useContext(BracketContext);
     const navigate = useNavigate();
     const [isJoining, setIsJoining] = useState(false);
 
@@ -180,14 +180,18 @@ export const NeonBracketMatch: React.FC<NeonBracketMatchProps> = ({
     const liveLobbyCode = activeMatches ? activeMatches[match.id] : undefined;
     const isLive = !!liveLobbyCode;
 
-    console.log('Match:', match.id, 'User:', currentUserChallongeId, 'Top:', topParty?.id, 'Bottom:', bottomParty?.id);
+    // Phase 33: Roster Map Resolution
+    const rosterMapObj = rosterMap || {};
+    // Extract true Roster IDs from the Challonge String IDs the Bracket component passes to us
+    const topRosterId = topParty?.id ? rosterMapObj[topParty.id.toString()] : undefined;
+    const bottomRosterId = bottomParty?.id ? rosterMapObj[bottomParty.id.toString()] : undefined;
 
     // Ensure status matching logic is safe. Transform maps 'open' -> SCHEDULED.
     const isOpen = match.state === 'SCHEDULED' || match.state === 'open';
-    const isPlayerInMatch = currentUserChallongeId && (
-        String(topParty?.id) === String(currentUserChallongeId) || 
-        String(bottomParty?.id) === String(currentUserChallongeId)
-    );
+    const isPlayerInMatch = Boolean(currentUserChallongeId && (
+        topRosterId === currentUserChallongeId || 
+        bottomRosterId === currentUserChallongeId
+    ));
     
     const showJoinButton = isOpen && isPlayerInMatch;
 
@@ -197,10 +201,17 @@ export const NeonBracketMatch: React.FC<NeonBracketMatchProps> = ({
 
         setIsJoining(true);
         try {
-            const { data: lobbyCode, error } = await supabase.rpc('join_official_match', {
-                p_match_id: String(match.id),
-                p_team_a_challonge_id: String(topParty?.id || ''),
-                p_team_b_challonge_id: String(bottomParty?.id || '')
+            // Phase 33: We use the locally mapped Roster IDs instead of raw Challonge Integers
+            // If they are missing from the junction table, this match is invalid
+            if (!topRosterId || !bottomRosterId) {
+                throw new Error("Competitors have not synced via Tournament Registrations Matrix.");
+            }
+
+            const { data: lobbyCode, error } = await supabase.rpc('create_lobby', {
+                p_lobby_name: `TNK-${String(match.id).slice(-4)}`,
+                p_team_a_roster_id: topRosterId,
+                p_team_b_roster_id: bottomRosterId,
+                p_challonge_match_id: String(match.id)
             });
 
             if (error) {
@@ -211,7 +222,9 @@ export const NeonBracketMatch: React.FC<NeonBracketMatchProps> = ({
             } 
             
             if (lobbyCode) {
-                navigate(`/join/${lobbyCode}`);
+                // Safely handle if the RPC returns the lobby row object vs just a string code
+                const codeToJoin = typeof lobbyCode === 'object' ? (lobbyCode.code || lobbyCode.id) : lobbyCode;
+                navigate(`/join/${codeToJoin}`);
             }
         } catch (err: any) {
             console.error('Unexpected error joining lobby:', err);

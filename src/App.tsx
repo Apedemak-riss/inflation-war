@@ -9,6 +9,7 @@ import { UserSettings } from './components/UserSettings';
 import { MatchLogs } from './components/MatchLogs';
 import { TeamHub } from './components/TeamHub';
 import { TournamentHub } from './components/TournamentHub';
+import { TournamentView } from './components/TournamentView';
 
 import { Shield, Sword, Coins, ExternalLink, Hammer, Crown, Minus, Check, Users, RefreshCw, Trash2, Trophy, ArrowRightLeft, LogOut, Gavel, MonitorPlay, ClipboardCheck, AlertTriangle, Loader2, Edit2, Save, X, Tv, PawPrint, Castle, Terminal, Wifi, Lock, Zap, Skull, Hexagon, Crosshair, Settings, ArrowRight, ChevronRight } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
@@ -2127,6 +2128,7 @@ function AppContent() {
   <Route path="/logs" element={<MatchLogs />} />
   <Route path="/team" element={<TeamHub />} />
   <Route path="/tournament" element={<TournamentHub />} />
+  <Route path="/tournament/:challongeUrl" element={<TournamentView />} />
   <Route path="*" element={<Navigate to="/" replace />} />
 </Routes>
 

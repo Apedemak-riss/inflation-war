@@ -5,6 +5,7 @@ export interface BracketContextType {
     isCaptain: boolean;
     tournamentUrl: string | null;
     activeMatches: Record<string, string>;
+    rosterMap?: Record<string, string>;
 }
 
 export const BracketContext = createContext<BracketContextType>({
