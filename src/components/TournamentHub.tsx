@@ -89,7 +89,29 @@ export const TournamentHub: React.FC = () => {
             .order('created_at', { ascending: false });
         
         if (!error && data) {
-            setTournaments(data);
+            try {
+                // Fetch Challonge index data to extract active match progress counts
+                const { data: cData } = await supabase.functions.invoke('challonge-proxy', {
+                    body: { endpoint: '/tournaments.json', method: 'GET' }
+                });
+                
+                if (cData && Array.isArray(cData)) {
+                    const mergedData = data.map(t => {
+                        const ct = cData.find((item: any) => item.tournament.url === t.challonge_url)?.tournament;
+                        return {
+                            ...t,
+                            matches_count: ct?.matches_count || 0,
+                            completed_matches_count: ct?.completed_matches_count || 0
+                        };
+                    });
+                    setTournaments(mergedData);
+                } else {
+                    setTournaments(data);
+                }
+            } catch (e) {
+                console.error("Failed to sync proxy stats", e);
+                setTournaments(data);
+            }
         }
         if (showLoading) setLoading(false);
     };
@@ -281,8 +303,26 @@ export const TournamentHub: React.FC = () => {
                                         </div>
                                     </div>
 
+                                    {/* Tournament Progress Bar */}
+                                    {t.matches_count > 0 && (
+                                        <div className="w-full mt-4">
+                                            <div className="flex justify-between items-center mb-1.5">
+                                                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Progress</span>
+                                                <span className="text-[10px] font-bold text-cyan-400">
+                                                    {Math.round((t.completed_matches_count / t.matches_count) * 100) || 0}% Complete
+                                                </span>
+                                            </div>
+                                            <div className="w-full h-1.5 bg-gray-700/50 rounded-full overflow-hidden">
+                                                <div 
+                                                    className="h-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all duration-500"
+                                                    style={{ width: `${(t.completed_matches_count / t.matches_count) * 100}%` }}
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+
                                     {/* Bottom Section */}
-                                    <div className="mt-6 pt-4 border-t border-white/5 flex items-center justify-between">
+                                    <div className="mt-4 pt-4 border-t border-white/5 flex items-center justify-between">
                                         {isCompleted ? (
                                             <div className="flex items-center gap-2 w-full">
                                                 <div className="p-1.5 bg-yellow-500/10 rounded-lg">
