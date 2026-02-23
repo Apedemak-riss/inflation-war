@@ -208,22 +208,20 @@ export const TournamentHub: React.FC = () => {
             </div>
 
             {/* Header */}
-            <div className="relative z-10 flex items-center justify-between mb-8 max-w-[1200px] mx-auto w-full">
+            <div className="relative z-10 mb-8 max-w-[1200px] mx-auto w-full">
                 <button 
                     onClick={() => navigate('/')}
-                    className="group flex items-center gap-2 text-slate-400 hover:text-white transition-colors uppercase tracking-widest text-xs font-bold"
+                    className="mb-6 group flex items-center gap-2 text-slate-400 hover:text-white transition-colors uppercase tracking-widest text-xs font-bold"
                 >
                     <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform"/> Return to Base
                 </button>
                 
-                <h1 className="text-2xl md:text-4xl font-black text-white flex items-center gap-3 md:gap-4 tracking-tighter drop-shadow-2xl">
+                <h1 className="text-2xl md:text-4xl font-black text-white flex items-center justify-center gap-3 md:gap-4 tracking-tighter drop-shadow-2xl">
                     <div className="p-3 md:p-4 bg-gradient-to-br from-purple-400 to-indigo-600 rounded-2xl shadow-[0_0_30px_rgba(168,85,247,0.3)]">
                         <Trophy className="text-white w-6 h-6 md:w-8 md:h-8" />
                     </div>
                     TOURNAMENT ARCHIVES
                 </h1>
-                
-                <div className="w-[100px] md:w-[130px]" /> {/* Spacer */}
             </div>
 
             {/* Content Container */}
