@@ -420,26 +420,26 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
             });
             
             return (
-                <div className="p-8 w-full max-w-6xl mx-auto space-y-12 min-h-[85vh] bg-[#050b14] overflow-y-auto">
+                <div className="p-4 md:p-8 w-full max-w-6xl mx-auto space-y-8 md:space-y-12 min-h-[85vh] bg-[#050b14] overflow-y-auto">
                     {/* Standings Table */}
                     <div className="bg-[#0a101f] border border-white/5 shadow-2xl rounded-2xl overflow-hidden">
-                        <div className="bg-gradient-to-r from-red-600/20 to-orange-500/20 px-8 py-6 border-b border-white/5 flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                                <Trophy className="w-6 h-6 text-yellow-500" />
-                                <h3 className="text-xl font-bold font-outfit tracking-wider text-white uppercase">{tournamentType} STANDINGS</h3>
+                        <div className="bg-gradient-to-r from-red-600/20 to-orange-500/20 px-4 py-4 md:px-8 md:py-6 border-b border-white/5 flex items-center justify-between">
+                            <div className="flex items-center gap-2 md:gap-3">
+                                <Trophy className="w-5 h-5 md:w-6 md:h-6 text-yellow-500" />
+                                <h3 className="text-sm md:text-xl font-bold font-outfit tracking-wider text-white uppercase">{tournamentType} STANDINGS</h3>
                             </div>
-                            <div className="text-slate-400 text-sm tracking-widest font-medium uppercase">
+                            <div className="text-slate-400 text-xs md:text-sm tracking-widest font-medium uppercase">
                                 Top {stats.length} Teams
                             </div>
                         </div>
                         <div className="overflow-x-auto">
                             <table className="w-full text-left border-collapse">
                                 <thead>
-                                    <tr className="bg-black/40 text-slate-400 text-sm uppercase tracking-wider font-semibold border-b border-white/5">
-                                        <th className="py-4 px-8 w-24 text-center">Rank</th>
-                                        <th className="py-4 px-8">Team</th>
-                                        <th className="py-4 px-8 text-center w-32">W-L-T</th>
-                                        <th className="py-4 px-8 text-center w-32">Points</th>
+                                    <tr className="bg-black/40 text-slate-400 text-[10px] md:text-sm uppercase tracking-wider font-semibold border-b border-white/5">
+                                        <th className="py-3 px-3 md:py-4 md:px-8 w-12 md:w-24 text-center">Rank</th>
+                                        <th className="py-3 px-3 md:py-4 md:px-8">Team</th>
+                                        <th className="py-3 px-3 md:py-4 md:px-8 text-center w-16 md:w-32">W-L-T</th>
+                                        <th className="py-3 px-3 md:py-4 md:px-8 text-center w-14 md:w-32">Points</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -452,8 +452,8 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
                                             <tr key={team.id} className={`border-b border-white/5 transition-colors ${
                                                 isMyTeam ? 'bg-red-500/10 hover:bg-red-500/20' : 'hover:bg-white/5'
                                             }`}>
-                                                <td className="py-5 px-8 text-center">
-                                                    <div className={`inline-flex items-center justify-center w-8 h-8 rounded-full font-bold ${
+                                                <td className="py-3 px-3 md:py-5 md:px-8 text-center">
+                                                    <div className={`inline-flex items-center justify-center w-6 h-6 md:w-8 md:h-8 rounded-full text-xs md:text-sm font-bold ${
                                                         index === 0 ? 'bg-yellow-500/20 text-yellow-500 border border-yellow-500/50' :
                                                         index === 1 ? 'bg-slate-300/20 text-slate-300 border border-slate-300/50' :
                                                         index === 2 ? 'bg-amber-700/20 text-amber-600 border border-amber-700/50' :
@@ -462,18 +462,18 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
                                                         {index + 1}
                                                     </div>
                                                 </td>
-                                                <td className="py-5 px-8">
-                                                    <span className={`font-semibold tracking-wide ${isMyTeam ? 'text-red-400' : 'text-slate-200'}`}>
+                                                <td className="py-3 px-3 md:py-5 md:px-8">
+                                                    <span className={`font-semibold tracking-wide text-xs md:text-base ${isMyTeam ? 'text-red-400' : 'text-slate-200'}`}>
                                                         {displayName}
                                                     </span>
                                                     {isMyTeam && (
-                                                        <span className="ml-3 text-[10px] uppercase tracking-wider font-bold text-red-500 bg-red-500/10 px-2 py-1 rounded-sm border border-red-500/20">Your Team</span>
+                                                        <span className="ml-2 md:ml-3 text-[8px] md:text-[10px] uppercase tracking-wider font-bold text-red-500 bg-red-500/10 px-1.5 md:px-2 py-0.5 md:py-1 rounded-sm border border-red-500/20">Your Team</span>
                                                     )}
                                                 </td>
-                                                <td className="py-5 px-8 text-center font-mono text-slate-300">
+                                                <td className="py-3 px-3 md:py-5 md:px-8 text-center font-mono text-xs md:text-base text-slate-300">
                                                     {team.stats.wins}-{team.stats.losses}-{team.stats.ties}
                                                 </td>
-                                                <td className="py-5 px-8 text-center font-bold text-white text-lg">
+                                                <td className="py-3 px-3 md:py-5 md:px-8 text-center font-bold text-white text-sm md:text-lg">
                                                     {team.stats.points}
                                                 </td>
                                             </tr>
@@ -486,9 +486,9 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
 
                     {/* Chronological Matches (List instead of Bracket) */}
                     <div>
-                        <div className="flex items-center gap-3 mb-6 px-2">
-                            <LayoutList className="w-6 h-6 text-red-500" />
-                            <h3 className="text-xl font-bold font-outfit tracking-wider text-white uppercase">Match Schedule</h3>
+                        <div className="flex items-center gap-2 md:gap-3 mb-4 md:mb-6 px-2">
+                            <LayoutList className="w-5 h-5 md:w-6 md:h-6 text-red-500" />
+                            <h3 className="text-sm md:text-xl font-bold font-outfit tracking-wider text-white uppercase">Match Schedule</h3>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                             {matches.map(match => {
@@ -625,7 +625,7 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
                         return (
                             <div 
                                 ref={containerRef}
-                                className="bracket-scroll-container w-full h-[85vh] overflow-hidden bg-[#050b14] relative"
+                                className="bracket-scroll-container w-full h-[60vh] md:h-[85vh] overflow-hidden bg-[#050b14] relative"
                             >
                                 <SVGViewer 
                                     {...restProps}
