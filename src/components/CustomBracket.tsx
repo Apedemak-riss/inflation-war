@@ -420,7 +420,7 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
             });
             
             return (
-                <div className="p-8 w-full max-w-6xl mx-auto space-y-12">
+                <div className="p-8 w-full max-w-6xl mx-auto space-y-12 min-h-[85vh] bg-[#050b14] overflow-y-auto">
                     {/* Standings Table */}
                     <div className="bg-[#0a101f] border border-white/5 shadow-2xl rounded-2xl overflow-hidden">
                         <div className="bg-gradient-to-r from-red-600/20 to-orange-500/20 px-8 py-6 border-b border-white/5 flex items-center justify-between">
