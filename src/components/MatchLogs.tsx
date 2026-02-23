@@ -1,10 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { ArrowLeft, Trophy, Users, Copy, Check, X, Search, Star, Activity } from 'lucide-react';
+import { ArrowLeft, Trophy, Users, Copy, Check, X, Search, Star, Activity, Trash2 } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import toast from 'react-hot-toast';
 
 export const MatchLogs = () => {
     const navigate = useNavigate();
+    const { user } = useAuth();
+    const [userRole, setUserRole] = useState<string | null>(null);
     const [logs, setLogs] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedMatch, setSelectedMatch] = useState<any | null>(null);
@@ -12,7 +16,81 @@ export const MatchLogs = () => {
     const [searchTerm, setSearchTerm] = useState('');
 
     useEffect(() => {
+        if (user?.id) {
+            supabase.from('profiles').select('role').eq('id', user.id).single()
+                .then(({ data }) => setUserRole(data?.role || null));
+        }
+    }, [user?.id]);
+
+    const handleDeleteMatch = (matchId: string) => {
+        toast.custom((t) => (
+            <div className="bg-[#0a101f] border border-red-500/30 p-4 rounded-xl shadow-2xl flex flex-col gap-3 min-w-[300px]">
+                <div className="flex items-start gap-3">
+                    <Trash2 className="text-red-500 shrink-0" size={24} />
+                    <div>
+                        <h4 className="font-bold text-red-100">Delete Match Record?</h4>
+                        <p className="text-sm text-red-500/80 mt-1">Are you sure? This action is permanent and cannot be undone.</p>
+                    </div>
+                </div>
+                <div className="flex justify-end gap-2 mt-2">
+                    <button
+                        onClick={() => toast.dismiss(t.id)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white/5 hover:bg-white/10 text-slate-300 transition-colors"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        onClick={async () => {
+                            toast.dismiss(t.id);
+                            const loadingToast = toast.loading('Deleting match...');
+                            try {
+                                const { error } = await supabase.rpc('delete_match_log', { p_match_id: matchId });
+                                if (error) throw error;
+                                toast.success('Match deleted successfully', { id: loadingToast });
+                                setSelectedMatch(null);
+                                fetchLogs();
+                            } catch (err: any) {
+                                toast.error('Failed to delete match', { id: loadingToast });
+                                console.error('Delete Match Error:', err);
+                            }
+                        }}
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-500/20 hover:bg-red-500/40 text-red-400 border border-red-500/50 transition-colors"
+                    >
+                        Yes, Delete
+                    </button>
+                </div>
+            </div>
+        ), { duration: Infinity });
+    };
+
+    useEffect(() => {
         fetchLogs();
+
+        // Realtime: watch for new match logs with StrictMode guard
+        let isMounted = true;
+        let channel: ReturnType<typeof supabase.channel> | null = null;
+
+        const timer = setTimeout(() => {
+            if (!isMounted) return;
+            channel = supabase.channel('match-logs-realtime')
+                .on(
+                    'postgres_changes',
+                    { event: '*', schema: 'public', table: 'match_logs' },
+                    (payload) => {
+                        console.log('[MatchLogs] Realtime event:', payload.eventType);
+                        fetchLogs();
+                    }
+                )
+                .subscribe((status) => {
+                    console.log('[MatchLogs] Realtime subscription status:', status);
+                });
+        }, 100);
+
+        return () => {
+            isMounted = false;
+            clearTimeout(timer);
+            if (channel) supabase.removeChannel(channel);
+        };
     }, []);
 
     const fetchLogs = async () => {
@@ -202,9 +280,20 @@ export const MatchLogs = () => {
                                     Lobby: <span className="text-white">{selectedMatch.lobby_name}</span> // Date: {formatDate(selectedMatch.played_at)}
                                 </p>
                             </div>
-                            <button onClick={() => setSelectedMatch(null)} className="p-3 bg-white/5 hover:bg-white/10 rounded-xl transition-colors">
-                                <X size={24}/>
-                            </button>
+                            <div className="flex items-center gap-2">
+                                {userRole === 'moderator' && (
+                                    <button 
+                                        onClick={() => handleDeleteMatch(selectedMatch.id)} 
+                                        className="p-3 bg-red-500/10 hover:bg-red-500/20 text-red-500/70 hover:text-red-400 border border-red-500/20 hover:border-red-500/40 rounded-xl transition-all shadow-[0_0_15px_rgba(239,68,68,0.1)] hover:shadow-[0_0_20px_rgba(239,68,68,0.2)]"
+                                        title="Delete Match"
+                                    >
+                                        <Trash2 size={24}/>
+                                    </button>
+                                )}
+                                <button onClick={() => setSelectedMatch(null)} className="p-3 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white rounded-xl transition-colors">
+                                    <X size={24}/>
+                                </button>
+                            </div>
                         </div>
 
                         {/* Modal Content */}

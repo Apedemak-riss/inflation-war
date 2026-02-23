@@ -7,6 +7,12 @@ const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 // Kill any network request that takes longer than 10 seconds.
 // Prevents "zombie" requests from hanging the UI after tab-switch.
 const fetchWithTimeout = (url: RequestInfo | URL, options: RequestInit = {}): Promise<Response> => {
+  // Don't timeout Realtime long-poll/websocket requests — they intentionally stay open
+  const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.href : (url as Request).url;
+  if (urlStr.includes('/realtime/') || urlStr.includes('vsn=')) {
+    return fetch(url, options);
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
 

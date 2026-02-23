@@ -2,6 +2,7 @@ import React, { useContext, useState } from 'react';
 import styled, { keyframes, css } from 'styled-components';
 import { BracketContext } from '../contexts/BracketContext';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabase';
 
 const MatchContainer = styled.div`
@@ -222,7 +223,7 @@ export const NeonBracketMatch: React.FC<NeonBracketMatchProps> = ({
 
             if (error) {
                 console.error('Error creating/joining lobby:', error);
-                alert('Failed to join lobby: ' + error.message);
+                toast.error('Failed to join lobby: ' + error.message);
                 setIsJoining(false);
                 return;
             } 
@@ -234,7 +235,7 @@ export const NeonBracketMatch: React.FC<NeonBracketMatchProps> = ({
             }
         } catch (err: any) {
             console.error('Unexpected error joining lobby:', err);
-            alert('Failed to join lobby: ' + err.message);
+            toast.error('Failed to join lobby: ' + err.message);
             setIsJoining(false);
         }
     };

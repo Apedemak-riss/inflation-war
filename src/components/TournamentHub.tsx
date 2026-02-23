@@ -4,14 +4,16 @@ import { ArrowLeft, Trophy, Plus, Calendar, DollarSign, X, Radio, Link as LinkIc
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { createTournament, registerParticipant } from '../services/challongeService';
+import toast from 'react-hot-toast';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 export const TournamentHub: React.FC = () => {
     const navigate = useNavigate();
     const { user } = useAuth();
     
+    const queryClient = useQueryClient();
+    
     const [profile, setProfile] = useState<any>(null);
-    const [tournaments, setTournaments] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
     const [showCreateModal, setShowCreateModal] = useState(false);
     
     // Phase 30 & 31 States
@@ -35,68 +37,79 @@ export const TournamentHub: React.FC = () => {
     // Error feedback
     const [creationError, setCreationError] = useState('');
     
-    const [isSubmitting, setIsSubmitting] = useState(false);
+    
 
     useEffect(() => {
-        const fetchHubData = async () => {
+        const fetchUserData = async () => {
             if (user?.id) {
                 const { data } = await supabase.from('profiles').select('role').eq('id', user.id).single();
                 setProfile(data);
                 
-                // Fetch roster if user is a captain
                 const { data: rosterData } = await supabase.from('rosters').select('*').eq('captain_id', user.id).single();
                 if (rosterData) {
                     setCaptainRoster(rosterData);
-                    
-                    // Fetch existing registrations for this roster
                     const { data: regs } = await supabase
                         .from('tournament_registrations')
                         .select('tournament_id')
                         .eq('roster_id', rosterData.id);
-                        
                     if (regs) {
                         setRegisteredTournaments(new Set(regs.map(r => r.tournament_id)));
                     }
                 }
             }
-            fetchTournaments();
         };
-        fetchHubData();
-        
-        // 🌟 Subscribe to Real-Time Tournament Updates 🌟
-        const channel = supabase.channel('hub-tournaments')
-            .on(
-                'postgres_changes',
-                { event: '*', schema: 'public', table: 'tournaments' },
-                () => {
-                    console.log("Real-time tournament update received. Refreshing Hub...");
-                    fetchTournaments(false);
-                }
-            )
-            .subscribe();
-
-        // Cleanup subscription on unmount
-        return () => {
-            supabase.removeChannel(channel);
-        };
+        fetchUserData();
     }, [user]);
 
-    const fetchTournaments = async (showLoading = true) => {
-        if (showLoading) setLoading(true);
-        const { data, error } = await supabase
-            .from('tournaments')
-            .select('*')
-            .order('created_at', { ascending: false });
-        
-        if (!error && data) {
+    // Separate useEffect for realtime — handles React StrictMode double-mount
+    useEffect(() => {
+        let isMounted = true;
+        let channel: ReturnType<typeof supabase.channel> | null = null;
+
+        // Small delay to survive StrictMode's mount-unmount-mount cycle
+        const timer = setTimeout(() => {
+            if (!isMounted) return;
+            channel = supabase.channel('hub-tournaments-realtime')
+                .on(
+                    'postgres_changes',
+                    { event: '*', schema: 'public', table: 'tournaments' },
+                    (payload) => {
+                        console.log('[TournamentHub] Realtime event:', payload.eventType, payload);
+                        queryClient.invalidateQueries({ queryKey: ['tournaments'] });
+                    }
+                )
+                .subscribe((status) => {
+                    console.log('[TournamentHub] Realtime subscription status:', status);
+                });
+        }, 100);
+
+        return () => {
+            isMounted = false;
+            clearTimeout(timer);
+            if (channel) supabase.removeChannel(channel);
+        };
+    }, [queryClient]);
+
+    // --- React Query: Fetch Tournaments ---
+    const { data: tournaments = [], isLoading } = useQuery({
+        queryKey: ['tournaments'],
+        staleTime: 0, // Always refetch on invalidation — realtime drives freshness
+        queryFn: async () => {
+            const { data, error } = await supabase
+                .from('tournaments')
+                .select('*')
+                .order('created_at', { ascending: false });
+            
+            if (error) throw error;
+            if (!data) return [];
+
             try {
-                // Fetch Challonge index data to extract active match progress counts
                 const { data: cData } = await supabase.functions.invoke('challonge-proxy', {
                     body: { endpoint: '/tournaments.json', method: 'GET' }
                 });
                 
                 if (cData && Array.isArray(cData)) {
-                    const mergedData = data.map(t => {
+                    return data.map(t => {
                         const ct = cData.find((item: any) => item.tournament.url === t.challonge_url)?.tournament;
                         return {
                             ...t,
@@ -104,24 +117,18 @@ export const TournamentHub: React.FC = () => {
                             completed_matches_count: ct?.completed_matches_count || 0
                         };
                     });
-                    setTournaments(mergedData);
-                } else {
-                    setTournaments(data);
                 }
+                return data;
             } catch (e) {
-                console.error("Failed to sync proxy stats", e);
-                setTournaments(data);
+                console.error('Failed to sync proxy stats', e);
+                return data;
             }
         }
-        if (showLoading) setLoading(false);
-    };
+    });
 
-    const handleCreateTournament = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setIsSubmitting(true);
-        setCreationError('');
-        
-        try {
+    // --- React Query: Create Tournament Mutation ---
+    const createTournamentMutation = useMutation({
+        mutationFn: async () => {
             // 1. Create on Challonge first
             await createTournament({
                 name: formTitle,
@@ -145,8 +152,11 @@ export const TournamentHub: React.FC = () => {
             }]);
 
             if (dbError) throw dbError;
-
-            // 3. Success cleanup
+        },
+        onSuccess: () => {
+            // Invalidate cache so the list auto-reloads
+            queryClient.invalidateQueries({ queryKey: ['tournaments'] });
+            // Reset form
             setShowCreateModal(false);
             setFormTitle('');
             setFormChallongeUrl('');
@@ -158,15 +168,17 @@ export const TournamentHub: React.FC = () => {
             setFormRegistrationUrl('');
             setFormTournamentType('single elimination');
             setFormGroupStages(false);
-            // DO NOT call fetchTournaments here; the realtime subscription handles it!
-            
-        } catch (error: any) {
-            console.error("Tournament Creation Framework Error:", error);
-            // Surface Challonge specific validation errors directly inside the Modal
-            setCreationError(error.message || "Unknown proxy error.");
-        } finally {
-            setIsSubmitting(false);
+        },
+        onError: (error: any) => {
+            console.error('Tournament Creation Framework Error:', error);
+            setCreationError(error.message || 'Unknown proxy error.');
         }
+    });
+
+    const handleCreateTournament = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setCreationError('');
+        createTournamentMutation.mutate();
     };
 
     const handleRegisterTeam = async (tournament: any) => {
@@ -189,10 +201,10 @@ export const TournamentHub: React.FC = () => {
             if (insertError) throw insertError;
             
             setRegisteredTournaments(prev => new Set(prev).add(tournament.id));
-            alert('Team successfully registered!');
+            toast.success('Team successfully registered!');
         } catch (error: any) {
             console.error("Registration Error:", error);
-            alert("Failed to register team: " + error.message);
+            toast.error('Failed to register team: ' + error.message);
         } finally {
             setIsRegistering(null);
         }
@@ -241,7 +253,7 @@ export const TournamentHub: React.FC = () => {
                 )}
 
                 {/* Grid */}
-                {loading ? (
+                {isLoading ? (
                     <div className="text-slate-400 animate-pulse font-mono tracking-widest mt-20">DECRYPTING ARCHIVES...</div>
                 ) : tournaments.length === 0 ? (
                     <div className="text-slate-500 font-mono tracking-widest mt-20 border border-slate-800 bg-slate-900/50 p-8 rounded-2xl">NO TOURNAMENTS FOUND IN DATABANKS</div>
@@ -555,10 +567,10 @@ export const TournamentHub: React.FC = () => {
                             <button 
                                 type="submit"
                                 form="create-tournament-form"
-                                disabled={isSubmitting || !formTitle.trim() || !formChallongeUrl.trim()}
+                                disabled={createTournamentMutation.isPending || !formTitle.trim() || !formChallongeUrl.trim()}
                                 className="bg-fuchsia-600 hover:bg-fuchsia-500 text-white px-8 py-3 rounded-xl font-black tracking-widest text-sm shadow-[0_0_20px_rgba(192,38,211,0.4)] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-fuchsia-600 flex items-center gap-2"
                             >
-                                {isSubmitting ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> INITIALIZING</> : 'INITIALIZE'}
+                                {createTournamentMutation.isPending ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> INITIALIZING</> : 'INITIALIZE'}
                             </button>
                         </div>
                     </div>

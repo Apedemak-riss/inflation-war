@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { ArrowLeft, Shield, Users, Crown, UserPlus, LogOut, Trash2, Copy, Check, X } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { confirmToast } from '../utils/confirmToast';
 
 export const TeamHub = () => {
     const navigate = useNavigate();
@@ -43,7 +45,7 @@ export const TeamHub = () => {
 
                     // Check if I was kicked/removed
                     if (payload.eventType === 'DELETE' && payload.old.user_id === user.id) {
-                        alert('You have been removed from the team.');
+                        toast.error('You have been removed from the team.');
                         setMyTeam(null);
                         setTeamMembers([]);
                         // Do NOT navigate away. Show "Create/Join" view.
@@ -61,7 +63,7 @@ export const TeamHub = () => {
                 },
                 (payload) => {
                     if (payload.old.id === myTeam.id) {
-                        alert('Your team has been disbanded.');
+                        toast.error('Your team has been disbanded.');
                         setMyTeam(null);
                         setTeamMembers([]);
                     }
@@ -121,8 +123,8 @@ export const TeamHub = () => {
     };
 
     const handleCreateTeam = async () => {
-        if (!createName || !createTag) return alert("Name and Tag required.");
-        if (createTag.length > 5) return alert("Tag too long (max 5 chars).");
+        if (!createName || !createTag) { toast.error('Name and Tag required.'); return; }
+        if (createTag.length > 5) { toast.error('Tag too long (max 5 chars).'); return; }
 
         try {
             setLoading(true);
@@ -141,11 +143,11 @@ export const TeamHub = () => {
                 // Check for unique violations (Postgres code 23505) OR explicitly check the message text
                 if (rosterError.code === '23505' || rosterError.message?.includes('unique constraint')) {
                     if (rosterError.message?.includes('rosters_tag_key') || rosterError.details?.includes('tag')) {
-                        alert(`Unit Tag "${createTag}" is already claiming territory. Request denied. Choose a unique identifier.`);
+                        toast.error(`Unit Tag "${createTag}" is already claiming territory. Choose a unique identifier.`);
                     } else if (rosterError.message?.includes('rosters_name_key') || rosterError.details?.includes('name')) {
-                        alert(`Unit Name "${createName}" is already registered in the database. Choose a unique designation.`);
+                        toast.error(`Unit Name "${createName}" is already registered. Choose a unique designation.`);
                     } else {
-                        alert("Unit Identity conflict. Name or Tag is already in use.");
+                        toast.error('Unit Identity conflict. Name or Tag is already in use.');
                     }
                     setLoading(false); // Ensure loading is reset on specific errors
                     return;
@@ -168,14 +170,14 @@ export const TeamHub = () => {
             setMyTeam(roster);
         } catch (err: any) {
              // Fallback for other errors
-            alert("Command Failure: " + (err.message || "Unknown Error"));
+            toast.error('Command Failure: ' + (err.message || 'Unknown Error'));
         } finally {
             setLoading(false);
         }
     };
 
     const handleJoinTeam = async () => {
-        if (!joinCode) return alert("Invite code required.");
+        if (!joinCode) { toast.error('Invite code required.'); return; }
 
         try {
             setLoading(true);
@@ -201,13 +203,13 @@ export const TeamHub = () => {
             // Refresh
             checkTeamStatus();
         } catch (err: any) {
-            alert("Error joining team: " + err.message);
+            toast.error('Error joining team: ' + err.message);
             setLoading(false);
         }
     };
 
     const handleLeaveTeam = async () => {
-        if (!confirm("Are you sure you want to leave this team?")) return;
+        if (!(await confirmToast('Are you sure you want to leave this team?'))) return;
         try {
             const { error } = await supabase
                 .from('roster_members')
@@ -217,12 +219,12 @@ export const TeamHub = () => {
             setMyTeam(null);
             setTeamMembers([]);
         } catch (err: any) {
-            alert("Error leaving team: " + err.message);
+            toast.error('Error leaving team: ' + err.message);
         }
     };
 
     const handleKickMember = async (targetUserId: string) => {
-        if (!confirm("Kick this operative?")) return;
+        if (!(await confirmToast('Kick this operative?'))) return;
         try {
             const { error } = await supabase
                 .from('roster_members')
@@ -232,12 +234,12 @@ export const TeamHub = () => {
             if (error) throw error;
             // No need to fetchTeamMembers here, real-time subscription will catch it
         } catch (err: any) {
-            alert("Error kicking member: " + err.message);
+            toast.error('Error kicking member: ' + err.message);
         }
     };
 
     const handleDisbandTeam = async () => {
-        if (!confirm("WARNING: Disbanding will delete the team permanent. Continue?")) return;
+        if (!(await confirmToast('WARNING: Disbanding will delete the team permanently. Continue?'))) return;
         try {
             const { error } = await supabase
                 .from('rosters')
@@ -247,7 +249,7 @@ export const TeamHub = () => {
             setMyTeam(null);
             setTeamMembers([]);
         } catch (err: any) {
-            alert("Error disbanding team: " + err.message);
+            toast.error('Error disbanding team: ' + err.message);
         }
     };
 

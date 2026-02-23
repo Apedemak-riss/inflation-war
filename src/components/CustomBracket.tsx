@@ -6,6 +6,7 @@ import { SingleEliminationBracket, DoubleEliminationBracket, Match, SVGViewer, c
 import { StyleSheetManager } from 'styled-components';
 import { NeonBracketMatch } from './NeonBracketMatch';
 import { fetchParticipants, fetchOpenMatches, fetchTournamentDetails } from '../services/challongeService'; 
+import toast from 'react-hot-toast';
 import { transformChallongeData } from '../utils/bracketTransforms';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -531,7 +532,7 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
                                                         e.stopPropagation();
                                                         try {
                                                             if (!topRosterId || !bottomRosterId) {
-                                                                alert("Competitors have not synced via Tournament Registrations Matrix.");
+                                                                toast.error('Competitors have not synced via Tournament Registrations Matrix.');
                                                                 return;
                                                             }
                                                             const { data: lobbyCode, error } = await supabase.rpc('create_lobby', {
@@ -547,7 +548,7 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
                                                             }
                                                         } catch (err: any) {
                                                             console.error('Error creating lobby:', err);
-                                                            alert('Failed to create lobby: ' + err.message);
+                                                            toast.error('Failed to create lobby: ' + err.message);
                                                         }
                                                     }}
                                                     className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-slate-900 border border-sky-500/50 text-sky-400 hover:bg-sky-500/20 hover:text-white hover:border-sky-400 text-[10px] uppercase font-bold px-4 py-1 rounded-full shadow-[0_0_10px_rgba(56,189,248,0.2)] transition-all z-10"

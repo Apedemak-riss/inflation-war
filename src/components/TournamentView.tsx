@@ -5,6 +5,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { CustomBracket } from './CustomBracket';
 import { ArrowLeft, Trophy, Crown, X, AlertTriangle, RotateCcw, Settings, Users, Terminal, MonitorPlay, ChevronRight, RefreshCw, Loader2, Trash2 } from 'lucide-react';
 import { fetchParticipants, finalizeTournament, startTournament, fetchOpenMatches, startGroupStage, finalizeGroupStage, fetchTournamentDetails } from '../services/challongeService';
+import toast from 'react-hot-toast';
+import { confirmToast } from '../utils/confirmToast';
 
 const TournamentPodium = ({ podiumData, tournament }: { podiumData: any[], tournament: any }) => {
     const renderRank = (rank: number, label: string, colorClass: string, iconColor: string, prizeStr: string | null) => {
@@ -101,6 +103,36 @@ export const TournamentView: React.FC = () => {
             setLoading(false);
         };
         fetchViewData();
+
+        // Realtime: watch this tournament for live updates — StrictMode safe
+        let isMounted = true;
+        let channel: ReturnType<typeof supabase.channel> | null = null;
+
+        const timer = setTimeout(() => {
+            if (!isMounted) return;
+            channel = supabase.channel(`tournament-view-${challongeUrl}`)
+                .on(
+                    'postgres_changes',
+                    { event: '*', schema: 'public', table: 'tournaments', filter: `challonge_url=eq.${challongeUrl}` },
+                    (payload) => {
+                        if (payload.eventType === 'DELETE') {
+                            toast.error('This tournament has been deleted.');
+                            navigate('/tournaments');
+                        } else {
+                            fetchTournamentData();
+                        }
+                    }
+                )
+                .subscribe((status) => {
+                    console.log('[TournamentView] Realtime subscription status:', status);
+                });
+        }, 100);
+
+        return () => {
+            isMounted = false;
+            clearTimeout(timer);
+            if (channel) supabase.removeChannel(channel);
+        };
     }, [user, challongeUrl]);
 
     // Fetch registered teams when mod panel opens
@@ -206,7 +238,7 @@ export const TournamentView: React.FC = () => {
             await fetchTournamentData();
         } catch (error: any) {
             console.error(error);
-            alert("Failed to finalize tournament: " + error.message);
+            toast.error('Failed to finalize tournament: ' + error.message);
         } finally {
             setIsProcessing(false);
         }
@@ -214,7 +246,7 @@ export const TournamentView: React.FC = () => {
 
     const handleReopenTournament = async () => {
         if (!tournament?.id) return;
-        const confirmReopen = window.confirm("Are you sure you want to REOPEN this tournament? The Champions string/snapshot will be permanently deleted and the status will return to 'active'.");
+        const confirmReopen = await confirmToast("Are you sure you want to REOPEN this tournament? The Champions snapshot will be permanently deleted and the status will return to 'active'.");
         if (!confirmReopen) return;
 
         const { error } = await supabase.from('tournaments')
@@ -224,68 +256,70 @@ export const TournamentView: React.FC = () => {
         if (!error) {
             await fetchTournamentData();
         } else {
-            alert("Failed to reopen tournament: " + error.message);
+            toast.error('Failed to reopen tournament: ' + error.message);
         }
     };
 
     const handleStartTournament = async () => {
         setIsProcessing(true);
         try {
-            // If group stages enabled, start the group stage instead of the full tournament
             if (tournament.group_stages_enabled) {
-                await startGroupStage(tournament.challonge_url);
-                const { error } = await supabase.from('tournaments').update({ status: 'active' }).eq('id', tournament.id);
-                if (error) throw error;
-                setChallongeState('group_stages_underway');
-                await fetchTournamentData();
-                alert('Group Stage Started on Challonge!');
+                await toast.promise(
+                    (async () => {
+                        await startGroupStage(tournament.challonge_url);
+                        const { error } = await supabase.from('tournaments').update({ status: 'active' }).eq('id', tournament.id);
+                        if (error) throw error;
+                        setChallongeState('group_stages_underway');
+                        await fetchTournamentData();
+                    })(),
+                    { loading: 'Starting Group Stage...', success: 'Group Stage Started!', error: (err) => err.message || 'Failed to start group stage' }
+                );
             } else {
-                await startTournament(tournament.challonge_url);
-                const { error } = await supabase.from('tournaments').update({ status: 'active' }).eq('id', tournament.id);
-                if (error) throw error;
-                await fetchTournamentData();
-                alert('Tournament Started on Challonge!');
+                await toast.promise(
+                    (async () => {
+                        await startTournament(tournament.challonge_url);
+                        const { error } = await supabase.from('tournaments').update({ status: 'active' }).eq('id', tournament.id);
+                        if (error) throw error;
+                        await fetchTournamentData();
+                    })(),
+                    { loading: 'Starting Tournament...', success: 'Tournament Started!', error: (err) => err.message || 'Failed to start tournament' }
+                );
             }
-        } catch (error: any) {
-            alert(error.message);
-        } finally {
-            setIsProcessing(false);
-        }
+        } catch { /* toast.promise handles display */ }
+        finally { setIsProcessing(false); }
     };
 
     const handleFinalizeGroupStage = async () => {
         setIsProcessing(true);
         try {
-            await finalizeGroupStage(tournament.challonge_url);
-            setChallongeState('group_stages_finalized');
-            await fetchTournamentData();
-            alert('Group Stage Finalized! The elimination bracket will now generate.');
-        } catch (error: any) {
-            alert('Failed to finalize group stage: ' + error.message);
-        } finally {
-            setIsProcessing(false);
-        }
+            await toast.promise(
+                (async () => {
+                    await finalizeGroupStage(tournament.challonge_url);
+                    setChallongeState('group_stages_finalized');
+                    await fetchTournamentData();
+                })(),
+                { loading: 'Finalizing Group Stage...', success: 'Group Stage Finalized! Bracket generating...', error: (err) => 'Failed to finalize group stage: ' + err.message }
+            );
+        } catch { /* toast.promise handles display */ }
+        finally { setIsProcessing(false); }
     };
 
     const handleSyncMatches = async () => {
         setIsSyncing(true);
         try {
-            const matches = await fetchOpenMatches(tournament.challonge_url);
-            if (!matches || matches.length === 0) {
-                alert("No open matches found on Challonge.");
-                return;
-            }
-
-            // Phase 33: Just force a re-fetch of the Tournament Hub UI to refresh native match mappings
-            await fetchTournamentData();
-            
-            alert(`Synced ${matches.length} active matches from Challonge.`);
-        } catch (error: any) {
-            console.error("Sync Error:", error);
-            alert("Sync Failed: " + error.message);
-        } finally {
-            setIsSyncing(false);
-        }
+            await toast.promise(
+                (async () => {
+                    const matches = await fetchOpenMatches(tournament.challonge_url);
+                    if (!matches || matches.length === 0) {
+                        throw new Error('No open matches found on Challonge.');
+                    }
+                    await fetchTournamentData();
+                    return matches;
+                })(),
+                { loading: 'Syncing matches from Challonge...', success: (matches) => `Synced ${matches.length} active matches.`, error: (err) => err.message || 'Sync Failed' }
+            );
+        } catch { /* toast.promise handles display */ }
+        finally { setIsSyncing(false); }
     };
 
     if (loading) {
@@ -554,7 +588,7 @@ export const TournamentView: React.FC = () => {
                                             
                                             {/* Future VOID Implementation Setup */}
                                             <button 
-                                                onClick={() => alert('Void logic pending...')}
+                                                onClick={() => toast('Void logic pending...', { icon: '⚠️' })}
                                                 disabled={isProcessing}
                                                 className="w-full flex items-center justify-between p-4 bg-red-900/10 border border-red-500/20 hover:bg-red-900/30 hover:border-red-500 text-red-300 rounded-xl transition-all font-black tracking-widest text-sm group opacity-70 hover:opacity-100 disabled:opacity-50"
                                             >

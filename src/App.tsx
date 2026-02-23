@@ -12,6 +12,9 @@ import { TournamentHub } from './components/TournamentHub';
 import { TournamentView } from './components/TournamentView';
 
 import { Shield, Sword, Coins, ExternalLink, Hammer, Crown, Minus, Check, Users, RefreshCw, Trash2, Trophy, ArrowRightLeft, LogOut, Gavel, MonitorPlay, ClipboardCheck, AlertTriangle, Loader2, Edit2, Save, X, Tv, PawPrint, Castle, Terminal, Wifi, Lock, Zap, Skull, Hexagon, Crosshair, Settings, ArrowRight, ChevronRight, ArrowLeft } from 'lucide-react';
+import toast, { Toaster } from 'react-hot-toast';
+import { confirmToast } from './utils/confirmToast';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
 
 // --- TYPES ---
@@ -447,7 +450,7 @@ function AppContent() {
       if (mode === '/moderator' && !lobby) {
          const { data: nl } = await withTimeout<any>(supabase.from('lobbies').insert({ code }).select().single());
          lobby = nl; await withTimeout(supabase.from('teams').insert([{ lobby_id: nl.id, name: 'Team 1', budget: 100 }, { lobby_id: nl.id, name: 'Team 2', budget: 100 }]));
-      } else if (!lobby) { setLoading(false); return alert("Not found"); }
+      } else if (!lobby) { setLoading(false); toast.error('Lobby not found.'); return; }
       setFoundLobby(lobby); 
       fetchTeams(lobby.id); 
       
@@ -467,7 +470,7 @@ function AppContent() {
         setLoading(false);
         return handleFindLobby(mode, modeArg, retryCount + 1);
       }
-      alert('Error: ' + (err?.message || 'Unknown error'));
+      toast.error('Error: ' + (err?.message || 'Unknown error'));
     } finally {
       setLoading(false);
     }
@@ -475,9 +478,9 @@ function AppContent() {
 
   const openOverseerModal = async () => {
     const code = lobbyCode.trim().toUpperCase();
-    if (!code) return alert('Enter a Lobby ID first.');
+    if (!code) { toast.error('Enter a Lobby ID first.'); return; }
     if (!profile || profile.role !== 'moderator') {
-        return alert("ACCESS DENIED: Insufficient Security Clearance. Moderator privileges required.");
+        toast.error('ACCESS DENIED: Insufficient Security Clearance.'); return;
     }
     
     setModLoading(true);
@@ -494,7 +497,7 @@ function AppContent() {
             }
         } else if (error) {
             console.error("Error fetching rosters:", error);
-            alert("Error loading tournament rosters.");
+            toast.error('Error loading tournament rosters.');
         }
     }
     
@@ -534,10 +537,10 @@ function AppContent() {
 
   const handleModeratorAccess = async (retryCount = 0, overrideCode?: string) => {
     const code = (overrideCode || lobbyCode).trim().toUpperCase();
-    if (!code) return alert('Enter a Lobby ID first.');
+    if (!code) { toast.error('Enter a Lobby ID first.'); return; }
     
     if (!profile || profile.role !== 'moderator') {
-        return alert("ACCESS DENIED: Insufficient Security Clearance. Moderator privileges required.");
+        toast.error('ACCESS DENIED: Insufficient Security Clearance.'); return;
     }
 
     console.log('[ModAccess] Starting lobby creation for:', code, 'Retry:', retryCount);
@@ -617,9 +620,9 @@ function AppContent() {
       }
       
       if (err.message?.includes('row-level security') || err.message?.includes('violates row-level security policy')) {
-          alert('ACCESS DENIED: Database policy violation. Ensure you have Moderator privileges.');
+          toast.error('ACCESS DENIED: Database policy violation.');
       } else {
-          alert('Error: ' + (err?.message || 'Unknown error'));
+          toast.error('Error: ' + (err?.message || 'Unknown error'));
       }
       
     } finally {
@@ -629,9 +632,9 @@ function AppContent() {
 
   const handleJoinTeam = async (tName: string) => {
     const nameToUse = (profile && profile.username && !profile.username.startsWith('Recruit_')) ? profile.username : playerName;
-    if (!nameToUse) return alert("Enter name!");
+    if (!nameToUse) { toast.error('Enter your name first.'); return; }
     const team = lobbyTeams.find(t => t.name === tName);
-    if (team?.players && team.players.length >= 3) return alert("Full!");
+    if (team?.players && team.players.length >= 3) { toast.error('Team is full!'); return; }
     
     setDeployLoading(true);
 
@@ -647,9 +650,9 @@ function AppContent() {
 
     if (error) {
          if (error.message?.includes('Access Denied')) {
-             return alert(error.message);
+             toast.error(error.message); return;
          }
-         return alert("Error joining: " + error.message);
+         toast.error('Error joining: ' + error.message); return;
     }
     
     localStorage.setItem('iw_pid', p.id);
@@ -671,7 +674,7 @@ function AppContent() {
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'players', filter: `id=eq.${playerId}` }, async (payload) => {
             if (payload.new && payload.new.team_id !== teamId) {
                 console.log('[Realtime] Player moved to new team:', payload.new.team_id);
-                alert("Moved to new team. Army reset.");
+                toast('Moved to new team. Army reset.', { icon: '🔄' });
                 const newTid = payload.new.team_id;
                 localStorage.setItem('iw_tid', newTid);
                 const { data: t } = await supabase.from('teams').select('name').eq('id', newTid).single();
@@ -680,12 +683,12 @@ function AppContent() {
             if (payload.new && payload.new.is_locked !== undefined) setIsLocked(payload.new.is_locked);
         })
         .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'teams', filter: `id=eq.${teamId}` }, () => {
-             alert("Team disbanded by moderator.");
+             toast.error('Team disbanded by moderator.');
              localStorage.removeItem('iw_pid'); localStorage.removeItem('iw_tid'); localStorage.removeItem('iw_lobby');
              setPlayerId(null); setTeamId(null); setFoundLobby(null); setLobbyCode(''); setIsLocked(false); navigate('/');
         })
         .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'players', filter: `id=eq.${playerId}` }, () => {
-            alert("You have been removed from the match.");
+            toast.error('You have been removed from the match.');
             localStorage.removeItem('iw_pid'); localStorage.removeItem('iw_tid'); localStorage.removeItem('iw_lobby');
             setPlayerId(null); setTeamId(null); setFoundLobby(null); setLobbyCode(''); setIsLocked(false); navigate('/');
         })
@@ -703,7 +706,7 @@ function AppContent() {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => fetchTeams(foundLobby.id))
         .on('postgres_changes', { event: '*', schema: 'public', table: 'purchases' }, () => fetchTeams(foundLobby.id))
         .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'lobbies', filter: `id=eq.${foundLobby.id}` }, () => {
-             alert("Lobby has been deleted.");
+             toast.error('Lobby has been deleted.');
              setFoundLobby(null);
              setLobbyCode('');
              setIsLocked(false);
@@ -723,11 +726,11 @@ function AppContent() {
 
   const handleBuy = async (item: Item, targetHero: string | null = null, isCC: boolean = false) => {
     if (isProcessing) return;
-    if (isLocked) return alert("ARMY LOCKED: You cannot modify your deployment.");
+    if (isLocked) { toast.error('ARMY LOCKED: You cannot modify your deployment.'); return; }
     if (!isCC && (targetHero || item.hero)) {
         const activeH = new Set();
         myPurchases.forEach(p => { if(!p.is_cc) { if(p.equipped_hero) activeH.add(p.equipped_hero); const i=dbItems.find(x=>x.id===p.item_id); if(i?.hero) activeH.add(i.hero); }});
-        if (!activeH.has(targetHero || item.hero) && activeH.size >= 4) return alert("4 Heroes Max");
+        if (!activeH.has(targetHero || item.hero) && activeH.size >= 4) { toast.error('4 Heroes Max'); return; }
     }
     if (item.type === 'pet' && !targetHero && !isCC) { setPetModalItem(item); return; }
     
@@ -737,22 +740,22 @@ function AppContent() {
         (item.inflation_type === 'exponential' ? item.base_price * Math.pow((item.inflation_rate || 2), count) : 
         item.base_price + (count * (item.inflation_rate || 2)))
     ));
-    if (teamBudget < p) return alert("No budget");
+    if (teamBudget < p) { toast.error('Not enough budget.'); return; }
 
     let cat: any = 'troop';
     if (item.type === 'spell') cat = 'spell'; else if (item.type === 'siege') cat = 'siege'; else if (item.type === 'equipment') cat = 'equipment';
     if (isCC) {
-        if (item.type === 'pet' || item.type === 'equipment') return alert("Pets/Equipment cannot go in Clan Castle");
+        if (item.type === 'pet' || item.type === 'equipment') { toast.error('Pets/Equipment cannot go in Clan Castle'); return; }
         if (item.type === 'siege') {
              const ccSiegeCount = myPurchases.filter(p => p.is_cc && dbItems.find(i => i.id === p.item_id)?.type === 'siege').length;
-             if (ccSiegeCount >= 2) return alert("CC Sieges Full");
+             if (ccSiegeCount >= 2) { toast.error('CC Sieges Full'); return; }
         } else {
              const current = getCurrentWeight(cat, true);
-             if (current + item.housing_space > CC_LIMITS[cat as keyof typeof CC_LIMITS]) return alert("CC Full");
+             if (current + item.housing_space > CC_LIMITS[cat as keyof typeof CC_LIMITS]) { toast.error('CC Full'); return; }
         }
     } else if (cat !== 'equipment' && item.type !== 'pet') {
              const current = getCurrentWeight(cat, false);
-             if (current + item.housing_space > LIMITS[cat as keyof typeof LIMITS]) return alert("Army Full");
+             if (current + item.housing_space > LIMITS[cat as keyof typeof LIMITS]) { toast.error('Army Full'); return; }
     }
 
     setIsProcessing(true); setPetModalItem(null);
@@ -761,36 +764,34 @@ function AppContent() {
     fetchGameState(); setIsProcessing(false);
   };
 
-  const handleSell = async (item: Item) => { if (isLocked) return alert("ARMY LOCKED"); await supabase.rpc('sell_item', { p_player_id: playerId, p_item_id: item.id }); fetchGameState(); };
+  const handleSell = async (item: Item) => { if (isLocked) { toast.error('ARMY LOCKED'); return; } await supabase.rpc('sell_item', { p_player_id: playerId, p_item_id: item.id }); fetchGameState(); };
   const handleLeave = async () => { 
-    if (isLocked) return alert("ARMY LOCKED: You cannot leave the match once committed.");
-    if(confirm("Are you sure you want to leave the match? converting all your assets back to gold for the team...")) { 
-        setIsProcessing(true);
-        if(playerId) {
-            await supabase.rpc('clear_player_army', { p_player_id: playerId });
-            await supabase.rpc('leave_team', { p_player_id: playerId }); 
-        }
-        localStorage.removeItem('iw_pid');
-        localStorage.removeItem('iw_tid');
-        localStorage.removeItem('iw_lobby');
-        setPlayerId(null);
-        setTeamId(null);
-        setFoundLobby(null);
-        setLobbyCode('');
-        setIsProcessing(false);
-        navigate('/'); 
+    if (isLocked) { toast.error('ARMY LOCKED: You cannot leave the match once committed.'); return; }
+    if(!(await confirmToast('Are you sure you want to leave the match? All your assets will be refunded to the team.'))) return;
+    setIsProcessing(true);
+    if(playerId) {
+        await supabase.rpc('clear_player_army', { p_player_id: playerId });
+        await supabase.rpc('leave_team', { p_player_id: playerId }); 
     }
+    localStorage.removeItem('iw_pid');
+    localStorage.removeItem('iw_tid');
+    localStorage.removeItem('iw_lobby');
+    setPlayerId(null);
+    setTeamId(null);
+    setFoundLobby(null);
+    setLobbyCode('');
+    setIsProcessing(false);
+    navigate('/'); 
   };
 
   const handleClearArmy = async () => {
-      if (isLocked) return alert("ARMY LOCKED");
+      if (isLocked) { toast.error('ARMY LOCKED'); return; }
       if (myPurchases.length === 0) return;
-      if (confirm("Are you sure you want to scrap your entire deployment? This will refund all gold to the team budget.")) {
-          setIsProcessing(true);
-          await supabase.rpc('clear_player_army', { p_player_id: playerId });
-          fetchGameState();
-          setIsProcessing(false);
-      }
+      if (!(await confirmToast('Scrap your entire deployment? This will refund all gold to the team budget.'))) return;
+      setIsProcessing(true);
+      await supabase.rpc('clear_player_army', { p_player_id: playerId });
+      fetchGameState();
+      setIsProcessing(false);
   };
 
   // --- REFEREE ---
@@ -844,7 +845,7 @@ function AppContent() {
          }
          return;
     }
-    if (!confirm("CONFIRM DEPLOYMENT?\n\nThis will LOCK your army and prevent further changes.\n\nAre you sure you are ready?")) return;
+    if (!(await confirmToast('CONFIRM DEPLOYMENT?\n\nThis will LOCK your army and prevent further changes.'))) return;
 
     const getItem = (id: string) => dbItems.find(i => i.id === id);
     const gen = (list: any[], types: string[]) => {
@@ -876,7 +877,7 @@ function AppContent() {
     if (playerId) {
         setIsProcessing(true);
         const { error } = await supabase.rpc('lock_player_army', { p_player_id: playerId, p_army_link: url });
-        if (error) alert("Error locking army: " + error.message);
+        if (error) toast.error('Error locking army: ' + error.message);
         else setIsLocked(true);
         setIsProcessing(false);
     }
@@ -984,7 +985,7 @@ function AppContent() {
       for (const team of lobbyTeams) {
           const score = endMatchScores[team.id];
           if (!score || score.stars === '' || score.percentage === '') {
-              alert(`Please enter both Stars and Destruction % for ${team.name}`);
+              toast.error(`Please enter both Stars and Destruction % for ${team.name}`);
               return;
           }
       }
@@ -995,7 +996,7 @@ function AppContent() {
           // Automated Bracket Advancement Logic
           if (foundLobby.challonge_match_id) {
               if (!tournamentUrl) {
-                  alert("Please enter the Tournament URL to auto-update the bracket. Otherwise, cancel and manually resolve.");
+                  toast.error('Please enter the Tournament URL to auto-update the bracket.');
                   setModLoading(false);
                   return;
               }
@@ -1032,7 +1033,7 @@ function AppContent() {
               }
               
               if (!wChallongeId) {
-                  alert(`Cannot advance bracket: Winning team (${winnerTeam.name}) has no linked Challonge ID in this tournament registration pool.`);
+                  toast.error(`Cannot advance bracket: Winning team (${winnerTeam.name}) has no linked Challonge ID.`);
                   setModLoading(false);
                   return;
               }
@@ -1108,7 +1109,7 @@ function AppContent() {
               }
               
               if (!loserChallongeId) {
-                  alert('Cannot determine losing team Challonge ID. Score will not be submitted.');
+                  toast.error('Cannot determine losing team Challonge ID. Score will not be submitted.');
                   setModLoading(false);
                   return;
               }
@@ -1119,39 +1120,36 @@ function AppContent() {
           
           const { error } = await supabase.rpc('end_match_secure', { p_lobby_id: foundLobby.id, p_team_scores: endMatchScores });
           if (error) throw error;
-          alert("Match Archived & Lobby Cleared.");
+          toast.success('Match Archived & Lobby Cleared.');
           setShowEndMatchModal(false);
           setFoundLobby(null); setLobbyCode(''); navigate('/');
       } catch (err: any) {
-          alert("Error: " + err.message);
+          toast.error('Error: ' + err.message);
       } finally {
           setModLoading(false);
       }
   };
 
   const handleNuke = async () => { 
-    if(confirm("DELETE LOBBY? This action cannot be undone.")) {
-        await supabase.rpc('delete_lobby', { p_lobby_id: foundLobby.id });
-        setFoundLobby(null);
-        setLobbyCode('');
-        navigate('/');
-    }
+    if(!(await confirmToast('DELETE LOBBY? This action cannot be undone.'))) return;
+    await supabase.rpc('delete_lobby', { p_lobby_id: foundLobby.id });
+    setFoundLobby(null);
+    setLobbyCode('');
+    navigate('/');
   };
   const handleSwitch = async (pId: string, currentTeamName: string) => { 
     if (lobbyTeams.length < 2) return; 
     const other = lobbyTeams.find(t => t.name !== currentTeamName); 
-    if(other && confirm(`Switch to ${other.name}? This will refund the current team's budget and clear the player's army.`)) { 
-        await supabase.rpc('clear_player_army', { p_player_id: pId });
-        await supabase.from('players').update({ team_id: other.id }).eq('id', pId); 
-        fetchTeams(foundLobby.id); 
-    } 
+    if(!other || !(await confirmToast(`Switch to ${other.name}? This will refund the current team's budget and clear the player's army.`))) return;
+    await supabase.rpc('clear_player_army', { p_player_id: pId });
+    await supabase.from('players').update({ team_id: other.id }).eq('id', pId); 
+    fetchTeams(foundLobby.id); 
   };
-  const handleKick = async (pId: string) => { if(confirm("Kick player?")) { await supabase.from('players').delete().eq('id', pId); fetchTeams(foundLobby.id); } };
+  const handleKick = async (pId: string) => { if(!(await confirmToast('Kick player?'))) return; await supabase.from('players').delete().eq('id', pId); fetchTeams(foundLobby.id); };
   const handleReset = async (tId: string) => { 
-      if(confirm("Initiate Protocol: Purge & Reset? This will delete all team purchases and restore the budget to 100g.")) { 
-          await supabase.rpc('moderator_reset_team', { p_team_id: tId }); 
-          fetchTeams(foundLobby.id); 
-      } 
+      if(!(await confirmToast('Initiate Protocol: Purge & Reset? This will delete all team purchases and restore the budget to 100g.'))) return;
+      await supabase.rpc('moderator_reset_team', { p_team_id: tId }); 
+      fetchTeams(foundLobby.id); 
   };
 
   // --- RENDERING CC SECTION ---
@@ -2481,11 +2479,18 @@ function AppContent() {
 }
 
 // --- AUTH WRAPPER ---
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { staleTime: 1000 * 60, refetchOnWindowFocus: false } }
+});
+
 export function App() {
   return (
+    <QueryClientProvider client={queryClient}>
     <AuthProvider>
+      <Toaster position="bottom-right" toastOptions={{ style: { background: '#0a101f', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', fontFamily: 'inherit', fontSize: '13px', fontWeight: 600, letterSpacing: '0.03em' }, success: { iconTheme: { primary: '#22c55e', secondary: '#fff' } }, error: { iconTheme: { primary: '#ef4444', secondary: '#fff' } } }} />
       <CallsignModal />
       <AppContent />
     </AuthProvider>
+    </QueryClientProvider>
   );
 }

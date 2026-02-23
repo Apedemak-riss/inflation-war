@@ -77,57 +77,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }, 3000);
 
-    // ── 1. Get initial session ──
-    const initSession = async () => {
-      try {
-        const { data: { session: currentSession } } = await supabase.auth.getSession();
-
-        if (!isMounted) return;
-
-        setSession(currentSession);
-        setUser(currentSession?.user ?? null);
-
-        // Fetch profile in its own try/catch — must never skip finally
-        if (currentSession?.user) {
-          try {
-            const { data, error } = await supabase
-              .from('profiles')
-              .select('id, email, username, role, avatar_url')
-              .eq('id', currentSession.user.id)
-              .single();
-
-            if (!isMounted) return;
-
-            if (error) {
-              console.error('[AuthContext] Profile fetch error during init:', error.message);
-              setProfile(null);
-            } else {
-              setProfile(data as UserProfile);
-            }
-          } catch (profileErr) {
-            console.error('[AuthContext] Profile fetch threw during init:', profileErr);
-            if (isMounted) setProfile(null);
-          }
-        }
-      } catch (err) {
-        if (isAbortError(err)) {
-          console.warn('[AuthContext] getSession aborted (Web Lock / Strict Mode). Treating as no session.');
-        } else {
-          console.error('[AuthContext] Failed to get session:', err);
-        }
-      } finally {
-        // ALWAYS release the loading gate — even on abort or profile failure
-        clearTimeout(failsafeTimer);
-        if (isMounted) setLoading(false);
-      }
-    };
-
-    initSession();
-
-    // ── 2. Listen for auth changes ──
+    // ── 1. Listen for auth changes (MUST be registered BEFORE getSession) ──
+    // This ensures INITIAL_SESSION event is captured even with StrictMode shenanigans
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, newSession) => {
+      async (event, newSession) => {
         if (!isMounted) return;
+        console.log('[AuthContext] onAuthStateChange:', event);
 
         setSession(newSession);
         setUser(newSession?.user ?? null);
@@ -137,13 +92,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else {
           setProfile(null);
         }
+        clearTimeout(failsafeTimer);
         setLoading(false);
       }
     );
 
+    // ── 2. Get initial session (triggers INITIAL_SESSION event above) ──
+    supabase.auth.getSession().catch(err => {
+      if (isAbortError(err)) {
+        console.warn('[AuthContext] getSession aborted (Web Lock / Strict Mode).');
+      } else {
+        console.error('[AuthContext] Failed to get session:', err);
+      }
+      clearTimeout(failsafeTimer);
+      if (isMounted) setLoading(false);
+    });
+
     // ── 3. Visibility handler: prevent stale-connection hangs ──
-    // When tab hides → stop auto-refresh (kills internal timers/listeners)
-    // When tab returns → restart auto-refresh on a fresh connection
     const handleVisibility = () => {
       if (document.hidden) {
         console.log('[AuthContext] Tab hidden → stopping auto-refresh');
@@ -155,7 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
-    // ── 4. Cleanup: unsubscribe + cancel failsafe + remove listener ──
+    // ── 4. Cleanup ──
     return () => {
       isMounted = false;
       clearTimeout(failsafeTimer);
@@ -163,6 +128,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [fetchProfile]);
+
+  // ── Separate effect for realtime profile watching ──
+  useEffect(() => {
+    if (!user?.id) return;
+
+    let isMounted = true;
+    let profileChannel: ReturnType<typeof supabase.channel> | null = null;
+
+    const timer = setTimeout(() => {
+      if (!isMounted) return;
+      profileChannel = supabase.channel(`profile-${user.id}`)
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` },
+          (payload) => {
+            console.log('[AuthContext] Profile updated in realtime:', payload.new);
+            setProfile(payload.new as UserProfile);
+          }
+        )
+        .subscribe();
+    }, 100);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+      if (profileChannel) supabase.removeChannel(profileChannel);
+    };
+  }, [user?.id]);
 
   const signOut = async () => {
     try {
