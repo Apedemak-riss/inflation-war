@@ -11,7 +11,7 @@ import { TeamHub } from './components/TeamHub';
 import { TournamentHub } from './components/TournamentHub';
 import { TournamentView } from './components/TournamentView';
 
-import { Shield, Sword, Coins, ExternalLink, Hammer, Crown, Minus, Check, Users, RefreshCw, Trash2, Trophy, ArrowRightLeft, LogOut, Gavel, MonitorPlay, ClipboardCheck, AlertTriangle, Loader2, Edit2, Save, X, Tv, PawPrint, Castle, Terminal, Wifi, Lock, Zap, Skull, Hexagon, Crosshair, Settings, ArrowRight, ChevronRight } from 'lucide-react';
+import { Shield, Sword, Coins, ExternalLink, Hammer, Crown, Minus, Check, Users, RefreshCw, Trash2, Trophy, ArrowRightLeft, LogOut, Gavel, MonitorPlay, ClipboardCheck, AlertTriangle, Loader2, Edit2, Save, X, Tv, PawPrint, Castle, Terminal, Wifi, Lock, Zap, Skull, Hexagon, Crosshair, Settings, ArrowRight, ChevronRight, ArrowLeft } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
 // --- TYPES ---
@@ -1590,7 +1590,11 @@ function AppContent() {
   <Route path="/referee" element={
     <div className="min-h-screen bg-[#050b14] text-white p-4 md:p-8 flex items-center justify-center animate-fade-in relative overflow-hidden">
         <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150 mix-blend-overlay pointer-events-none"></div>
-        <div className="max-w-3xl w-full relative z-10 glass p-6 md:p-10 rounded-[1.5rem] md:rounded-[2rem] border border-white/10 shadow-2xl backdrop-blur-xl bg-black/40">
+        <div className="max-w-3xl w-full relative z-10">
+            <button onClick={() => navigate('/')} className="mb-8 group flex items-center gap-2 text-slate-400 hover:text-white transition-colors uppercase tracking-widest text-xs font-bold">
+                <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform"/> Return to Base
+            </button>
+            <div className="glass p-6 md:p-10 rounded-[1.5rem] md:rounded-[2rem] border border-white/10 shadow-2xl backdrop-blur-xl bg-black/40">
             <div className="absolute top-0 right-0 p-4 md:p-6 opacity-30"><Gavel className="w-20 h-20 md:w-[120px] md:h-[120px] text-yellow-500/10"/></div>
             
             <div className="flex items-center gap-4 md:gap-6 mb-6 md:mb-10 relative z-10">
@@ -1662,10 +1666,8 @@ function AppContent() {
                 </div>
             )}
             
-            <button onClick={()=>navigate('/')} className="block w-full text-center text-slate-600 mt-8 hover:text-white uppercase tracking-[0.2em] text-[10px] font-bold transition-colors">
-                Termiate Audit Session
-            </button>
         </div>
+    </div>
     </div>
 
   } />

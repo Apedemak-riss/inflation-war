@@ -90,7 +90,7 @@ export const finalizeTournament = async (tournamentId: string) => {
         data: {
             type: "TournamentState",
             attributes: {
-                state: "complete"
+                state: "finalize"
             }
         }
     };

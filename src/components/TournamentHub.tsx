@@ -211,9 +211,9 @@ export const TournamentHub: React.FC = () => {
             <div className="relative z-10 flex items-center justify-between mb-8 max-w-[1200px] mx-auto w-full">
                 <button 
                     onClick={() => navigate('/')}
-                    className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors bg-white/5 hover:bg-white/10 px-4 py-2 rounded-xl border border-white/5 font-bold uppercase tracking-widest text-xs"
+                    className="group flex items-center gap-2 text-slate-400 hover:text-white transition-colors uppercase tracking-widest text-xs font-bold"
                 >
-                    <ArrowLeft size={16} /> MAIN MENU
+                    <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform"/> Return to Base
                 </button>
                 
                 <h1 className="text-2xl md:text-4xl font-black text-white flex items-center gap-3 md:gap-4 tracking-tighter drop-shadow-2xl">

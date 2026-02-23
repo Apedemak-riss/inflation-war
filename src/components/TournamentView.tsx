@@ -176,14 +176,15 @@ export const TournamentView: React.FC = () => {
         try {
             await finalizeTournament(tournament.challonge_url);
             const participants = await fetchParticipants(tournament.challonge_url);
-            const winner = participants.find((p: any) => p.participant.final_rank === 1);
+            // v2.1 JSON:API format: { id, attributes: { final_rank, name, ... } }
+            const winner = participants.find((p: any) => p.attributes?.final_rank === 1);
             
-            if (winner && winner.participant.id) {
+            if (winner && winner.id) {
                 const { data: registration, error: regError } = await supabase
                     .from('tournament_registrations')
                     .select('roster_id')
                     .eq('tournament_id', tournament.id)
-                    .eq('challonge_participant_id', winner.participant.id.toString())
+                    .eq('challonge_participant_id', winner.id.toString())
                     .single();
                     
                 if (regError || !registration) {
