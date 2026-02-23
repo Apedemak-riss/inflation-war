@@ -1,113 +1,152 @@
-export const transformChallongeData = (matches: any[], participants: any[], nameMap?: Record<string, string>) => {
-    if (!matches || !participants) return [];
-
-    // Map participants for quick lookup by their Challonge Participant ID and Group Participant IDs
-    const pMap: Record<string, any> = {};
-    participants.forEach(p => {
-        if (p.participant && p.participant.id) {
-            // Phase 35: Intercept Challonge's default tag with the natively synced database `rosters(name)`
-            const idStr = p.participant.id.toString();
-            const dbNameOverride = nameMap ? nameMap[idStr] : undefined;
-            
-            const name = dbNameOverride || p.participant.name || p.participant.display_name || p.participant.username || `Participant ${p.participant.id}`;
-            const pData = { id: idStr, name };
-            pMap[p.participant.id.toString()] = pData;
-            
-            if (p.participant.group_player_ids && Array.isArray(p.participant.group_player_ids)) {
-                p.participant.group_player_ids.forEach((gId: number) => {
-                    pMap[gId.toString()] = pData;
-                });
-            }
-        }
+export const transformChallongeData = (
+    participantsArray: any[],
+    matchesArray: any[]
+): { participants: any[], matches: any[] } => {
+    
+    // 1. Normalize Participants Array (JSON:API style)
+    // v2.1: [ { id, type, attributes: { ... } } ]
+    const normalizedParticipants = participantsArray.map(p => {
+        if (p.attributes) return { id: p.id, ...p.attributes };
+        if (p.participant) return p.participant; // Fallback for v1 purely just in case
+        return p;
     });
 
-    // Helper to get participant info from match
-    const getParticipantData = (matchInfo: any, playerId: number | null, scoreCsv: string, winnerId: number | null) => {
-        const idStr = playerId?.toString();
-        const pInfo = idStr ? pMap[idStr] : null;
-        const name = pInfo ? pInfo.name : idStr ? `Participant ${idStr}` : 'TBD';
-        
-        // Determine status
-        let status = 'SCHEDULED';
-        if (matchInfo.state === 'complete') status = 'PLAYED';
-        else if (matchInfo.state === 'open') status = 'PLAYED'; // Or maybe scheduled, but we use PLAYED to show scores if any? Let's use DONE/SCHEDULED logic.
-        
-        let isWinner = false;
-        if (winnerId && playerId && winnerId === playerId) {
-            isWinner = true;
-        }
-        
-        return {
-            id: idStr || Math.random().toString(), // fallback ID
-            resultText: scoreCsv || '',
-            isWinner: isWinner,
-            status: matchInfo.state === 'complete' ? 'PLAYED' : 'SCHEDULED', // G-loot uses PLAYED etc. inside participant
-            name: name,
-        };
-    };
+    // 2. Normalize Matches Array (JSON:API style)
+    const normalizedMatches = matchesArray.map(m => {
+        if (m.attributes) return { id: m.id, ...m.attributes };
+        if (m.match) return m.match; // Fallback
+        return m;
+    });
 
-    // Transform matches initially with no forward links
-    const transformedMatches: any[] = matches.map(m => {
-        const matchInfo = m.match;
-        const p1Id = matchInfo.player1_id;
-        const p2Id = matchInfo.player2_id;
+    // 3. Create Participant Map Strategy for faster lookups
+    const participantsMap: Record<string, any> = {};
+    const nameMap: Record<string, string> = {};
+
+    normalizedParticipants.forEach(p => {
+        const idStr = p.id?.toString();
+        // Fallbacks for group logic
+        const groupId1 = p.group_player_ids?.[0]?.toString();
         
-        let p1Score = '';
-        let p2Score = '';
-        if (matchInfo.scores_csv) {
-            const parts = matchInfo.scores_csv.split('-');
-            if (parts.length === 2) {
-                p1Score = parts[0];
-                p2Score = parts[1];
+        const finalP = {
+            id: idStr,
+            name: p.name || p.display_name || `Team ${idStr}`,
+            ...p
+        };
+
+        if (idStr) {
+            participantsMap[idStr] = finalP;
+            nameMap[idStr] = finalP.name;
+        }
+        if (groupId1) participantsMap[groupId1] = finalP; // Map group IDs back to the main participant if available
+    });
+
+    // 4. Transform Matches for @g-loot/react-tournament-brackets
+    const transformedMatches = normalizedMatches.map(raw => {
+        // v2.1 scores_csv might be in an Array on Match object now, or attributes.scores_csv
+        const scoreStr = raw.scores_csv || raw.score_set || '';
+        
+        let p1Score = undefined;
+        let p2Score = undefined;
+
+        if (scoreStr) {
+            // Split "1-2, 3-1" into just the final set usually, or sum them. 
+            // For simplicity, we just take the first set if it's "1-2"
+            const sets = scoreStr.split(',');
+            const lastSet = sets[sets.length - 1]; // Often the most relevant showing the final tally
+            const scores = lastSet.split('-').map((s: string) => s.trim());
+            if (scores.length === 2) {
+                p1Score = scores[0];
+                p2Score = scores[1];
             }
         }
 
+        const matchInfo = {
+            id: raw.id,
+            name: raw.identifier || `Match ${raw.id}`,
+            nextMatchId: raw.next_match_id || null, // Could be null for finals
+            nextLooserMatchId: raw.loser_to_match_id || null,
+            tournamentRoundText: raw.identifier ? `Round ${raw.identifier}` : `Round ${raw.round || raw.tournament_round}`,
+            startTime: raw.started_at || raw.scheduled_time || raw.created_at,
+            state: raw.state || 'SCHEDULED', // 'open', 'pending', 'complete'
+            participants: [],
+            group_id: raw.group_id,
+            ...raw // Keep all raw attributes available
+        };
+
+        // Determine who is Player 1 and Player 2.
+        const p1Id = raw.player1_id || raw.player_1_id;
+        const p2Id = raw.player2_id || raw.player_2_id;
+        
+        // Helper to construct participant objects for the library
+        const getParticipantData = (playerId: any, score: any, winnerId: any) => {
+            const idStr = playerId?.toString();
+            const pInfo = idStr ? participantsMap[idStr] : null;
+            const name = pInfo ? pInfo.name : idStr ? `Participant ${idStr}` : 'TBD';
+            
+            let isWinner = false;
+            if (winnerId && playerId && winnerId === playerId) {
+                isWinner = true;
+            }
+
+            return {
+                id: idStr || null,
+                resultText: score !== null && score !== undefined ? score : null,
+                isWinner: isWinner,
+                status: null, // Let the library infer
+                name: name,
+                picture: pInfo?.attached_participant_portrait_url || undefined,
+                // Add full participant info for custom rendering
+                _rawParticipant: pInfo,
+                prereqMatchId: null as any // Added to suppress TS type error
+            };
+        };
+
         return {
-            id: matchInfo.id.toString(),
-            name: matchInfo.identifier || `Match ${matchInfo.id}`,
-            nextMatchId: null, // Initialized to null, handled in pass 2
-            tournamentRoundText: `Round ${matchInfo.round}`, // Will enhance below
-            startTime: matchInfo.scheduled_time || matchInfo.created_at || '',
-            state: matchInfo.state === 'complete' ? 'DONE' : 'SCHEDULED',
+            id: matchInfo.id,
+            name: matchInfo.name,
+            nextMatchId: matchInfo.nextMatchId,
+            nextLooserMatchId: matchInfo.nextLooserMatchId,
+            tournamentRoundText: matchInfo.tournamentRoundText,
+            startTime: matchInfo.startTime,
+            state: matchInfo.state,
+            tournamentRound: matchInfo.tournament_round || matchInfo.round,
             participants: [
-                getParticipantData(matchInfo, p1Id, p1Score, matchInfo.winner_id),
-                getParticipantData(matchInfo, p2Id, p2Score, matchInfo.winner_id)
+                getParticipantData(p1Id, p1Score, matchInfo.winner_id),
+                getParticipantData(p2Id, p2Score, matchInfo.winner_id)
             ],
+            group_id: matchInfo.group_id,
             // Store raw data for pass 2
             _rawMatch: matchInfo 
         };
     });
 
-    // Pass 2: Resolve forward-links Using Prerequisite IDs
-    transformedMatches.forEach(tMatch => {
-        const raw = tMatch._rawMatch;
-        const currId = tMatch.id;
-        
-        // If the current match requires player1 from a previous match, mark that previous match's nextMatchId as current
-        if (raw.player1_prereq_match_id) {
-            const prereqHtmlMatch1 = transformedMatches.find(m => m.id === raw.player1_prereq_match_id.toString());
-            if (prereqHtmlMatch1) prereqHtmlMatch1.nextMatchId = currId;
+    // 5. Pass 2: Calculate specific next match routing where Challonge doesn't provide it clearly, or where dependencies exist
+    // @g-loot relies heavily on nextMatchId to build the tree structure.
+    const finalMatches = transformedMatches.map((match) => {
+        // v2.1 uses prerequisite_match_ids object, v1 uses player1_prereq_match_id
+        const prereqs = match._rawMatch.prerequisite_match_ids || {};
+        const p1Prereq = prereqs.player_1 || match._rawMatch.player1_prereq_match_id || match._rawMatch.player_1_prereq_match_id;
+        const p2Prereq = prereqs.player_2 || match._rawMatch.player2_prereq_match_id || match._rawMatch.player_2_prereq_match_id;
+
+        // Ensure participants know their routing source
+        if (match.participants[0]) match.participants[0].prereqMatchId = p1Prereq;
+        if (match.participants[1]) match.participants[1].prereqMatchId = p2Prereq;
+
+        // Back-link the nextMatchId since Challonge only natively looks backwards
+        if (p1Prereq) {
+            const prereqMatch = transformedMatches.find(m => m.id?.toString() === p1Prereq?.toString());
+            if (prereqMatch) prereqMatch.nextMatchId = match.id;
+        }
+        if (p2Prereq) {
+            const prereqMatch = transformedMatches.find(m => m.id?.toString() === p2Prereq?.toString());
+            if (prereqMatch) prereqMatch.nextMatchId = match.id;
         }
 
-        // If the current match requires player2 from a previous match, mark that previous match's nextMatchId as current
-        if (raw.player2_prereq_match_id) {
-            const prereqHtmlMatch2 = transformedMatches.find(m => m.id === raw.player2_prereq_match_id.toString());
-            if (prereqHtmlMatch2) prereqHtmlMatch2.nextMatchId = currId;
-        }
+        return match;
     });
 
-    // Pass 3: Enhance Round Text (Finals, Semi-Finals) based on max rounds
-    const maxRound = Math.max(...transformedMatches.map(m => m._rawMatch.round || 0));
-    transformedMatches.forEach(tMatch => {
-        const r = tMatch._rawMatch.round;
-        if (r === maxRound && maxRound > 0) tMatch.tournamentRoundText = "Finals";
-        else if (r === maxRound - 1 && maxRound > 1) tMatch.tournamentRoundText = "Semi-Finals";
-        else if (r === maxRound - 2 && maxRound > 2) tMatch.tournamentRoundText = "Quarter-Finals";
-        else tMatch.tournamentRoundText = `Round ${r}`;
-        
-        // Final cleanup
-        delete tMatch._rawMatch;
-    });
-
-    return transformedMatches;
+    return {
+        participants: normalizedParticipants,
+        matches: finalMatches
+    };
 };

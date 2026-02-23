@@ -2,10 +2,11 @@ import { supabase } from '../lib/supabase';
 
 // We use our Supabase Edge Function to securely retrieve Challonge data.
 // The Edge Function implicitly holds the `CHALLONGE_API_KEY` internally via Supabase Secrets.
-const buildEndpoint = (endpoint: string) => endpoint;
+
 
 export const fetchParticipants = async (tournamentId: string) => {
-    const endpoint = buildEndpoint(`/tournaments/${tournamentId}/participants`);
+    // v2.1 URL path
+    const endpoint = `/tournaments/${tournamentId}/participants`;
     const { data, error } = await supabase.functions.invoke('challonge-proxy', {
         body: { endpoint, method: 'GET' }
     });
@@ -13,13 +14,15 @@ export const fetchParticipants = async (tournamentId: string) => {
     if (error) {
         throw new Error(`Edge Function Error: ${error.message}`);
     }
-    return data;
+    // Return the data array internally wrapped by JSON:API
+    return data?.data || [];
 };
 
 export const fetchOpenMatches = async (tournamentId: string) => {
+    // Reverting to v1 API specifically to recover `prerequisite_match_ids` which are stripped in JSON:API v2.1
+    // The @g-loot frontend library requires these explicit node mappings to draw the upper/lower trees perfectly.
     const timestamp = new Date().getTime();
-    // Use # to hide the Edge Function's automatic '.json' appendage from being parsed as part of the query parameter
-    const endpoint = `/tournaments/${tournamentId}/matches.json?state=open&_=${timestamp}#`;
+    const endpoint = `/v1/tournaments/${tournamentId}/matches.json?state=all&_=${timestamp}`; // Fetch all states to calculate final rounds properly
     
     const { data, error } = await supabase.functions.invoke('challonge-proxy', {
         body: { endpoint, method: 'GET' }
@@ -28,22 +31,47 @@ export const fetchOpenMatches = async (tournamentId: string) => {
     if (error) {
         throw new Error(`Edge Function Error: ${error.message}`);
     }
-    return data;
+    // Return the v1 array
+    return data || [];
 };
 
-export const reportMatchScore = async (tournamentId: string, matchId: string, winnerId: string, scoresCsv: string) => {
+export const reportMatchScore = async (
+    tournamentId: string,
+    matchId: string,
+    winnerId: string,
+    winnerScore: string,
+    loserId: string,
+    loserScore: string
+) => {
+    // v2.1 URL path
     const endpoint = `/tournaments/${tournamentId}/matches/${matchId}`;
     
-    // Challonge requires 'match[scores_csv]' and 'match[winner_id]'
-    const params = new URLSearchParams();
-    params.append('match[scores_csv]', scoresCsv);
-    params.append('match[winner_id]', winnerId);
+    // v2.1 JSON:API payload — both participants must be included
+    const payload = {
+        data: {
+            type: "Match",
+            attributes: {
+                match: [
+                    {
+                        participant_id: winnerId,
+                        score_set: winnerScore, 
+                        advancing: true
+                    },
+                    {
+                        participant_id: loserId,
+                        score_set: loserScore,
+                        advancing: false
+                    }
+                ]
+            }
+        }
+    };
 
     const { data, error } = await supabase.functions.invoke('challonge-proxy', {
         body: { 
             endpoint, 
             method: 'PUT',
-            body: params.toString()
+            body: JSON.stringify(payload)
         }
     });
 
@@ -51,16 +79,27 @@ export const reportMatchScore = async (tournamentId: string, matchId: string, wi
         throw new Error(`Edge Function Error Updating Match: ${error.message}`);
     }
     
-    return data;
+    return data?.data;
 };
 
 export const finalizeTournament = async (tournamentId: string) => {
-    const endpoint = `/tournaments/${tournamentId}/finalize`;
+    // v2.1 URL path is changed to PUT on state
+    const endpoint = `/tournaments/${tournamentId}/change_state`;
     
+    const payload = {
+        data: {
+            type: "TournamentState",
+            attributes: {
+                state: "complete"
+            }
+        }
+    };
+
     const { data, error } = await supabase.functions.invoke('challonge-proxy', {
         body: { 
             endpoint, 
-            method: 'POST'
+            method: 'PUT',
+            body: JSON.stringify(payload)
         }
     });
 
@@ -68,55 +107,77 @@ export const finalizeTournament = async (tournamentId: string) => {
         throw new Error(`Edge Function Error: ${error.message}`);
     }
     
-    return data;
+    return data?.data;
 };
 
-export const createTournament = async (data: { name: string, url: string, tournamentType: string, groupStagesEnabled: boolean }) => {
+export const createTournament = async (tournamentData: { name: string, url: string, tournamentType: string, groupStagesEnabled: boolean }) => {
     const endpoint = '/tournaments';
     
-    const params = new URLSearchParams();
-    params.append('tournament[name]', data.name);
-    params.append('tournament[url]', data.url);
-    params.append('tournament[tournament_type]', data.tournamentType);
-    params.append('tournament[group_stages_enabled]', data.groupStagesEnabled.toString());
+    // JSON:API Tournament Creation Structure
+    const payload: any = {
+        data: {
+            type: "Tournaments",
+            attributes: {
+                name: tournamentData.name,
+                url: tournamentData.url,
+                tournament_type: tournamentData.tournamentType,
+                group_stages_enabled: tournamentData.groupStagesEnabled
+            }
+        }
+    };
+
+    if (tournamentData.tournamentType === 'round robin') {
+        payload.data.attributes.round_robin_options = {
+            iterations: 1,
+            ranking: "match wins"
+        };
+    }
 
     const { data: responseData, error } = await supabase.functions.invoke('challonge-proxy', {
         body: { 
             endpoint, 
             method: 'POST',
-            body: params.toString()
+            body: JSON.stringify(payload)
         }
     });
 
     if (error) {
         // Because Supabase Client intercepts HTTP 4xx/5xx and scrubs the payload,
-        // we fallback to the default error message, but realistically, the main
-        // reason a creation fails is due to duplicate URLs.
+        // we first check if there is a context or response payload attached.
+        if (error.context && error.context.errors) {
+             throw new Error(`Challonge Validation Error: ${JSON.stringify(error.context.errors)}`);
+        }
         if (error.message.includes('non-2xx')) {
-            throw new Error("Challonge rejected the request. The chosen URL/Subdomain is likely already taken.");
+            throw new Error(`Challonge rejected the request. Status 422. Please verify the URL is not taken and options are valid. Subtype block missing?`);
         }
         throw new Error(error.message || "Failed to initialize tournament on Challonge.");
     }
     
     // Challonge returns 422 if URL taken inside the payload (if proxied perfectly)
     if (responseData && responseData.errors) {
-        throw new Error(`Challonge Validation Error: ${responseData.errors.join(', ')}`);
+        throw new Error(`Challonge Validation Error: ${JSON.stringify(responseData.errors)}`);
     }
 
-    return responseData;
+    return responseData?.data;
 };
 
 export const registerParticipant = async (tournamentUrl: string, rosterName: string) => {
     const endpoint = `/tournaments/${tournamentUrl}/participants`;
     
-    const params = new URLSearchParams();
-    params.append('participant[name]', rosterName);
+    const payload = {
+        data: {
+            type: "Participant",
+            attributes: {
+                name: rosterName
+            }
+        }
+    };
 
     const { data: responseData, error } = await supabase.functions.invoke('challonge-proxy', {
         body: { 
             endpoint, 
             method: 'POST',
-            body: params.toString()
+            body: JSON.stringify(payload)
         }
     });
 
@@ -125,20 +186,31 @@ export const registerParticipant = async (tournamentUrl: string, rosterName: str
     }
     
     if (responseData && responseData.errors) {
-        throw new Error(`Challonge Validation Error: ${responseData.errors.join(', ')}`);
+        throw new Error(`Challonge Validation Error: ${JSON.stringify(responseData.errors)}`);
     }
 
-    return responseData?.participant?.id;
+    // In JSON:API, ID is at the top level of the data object
+    return responseData?.data?.id;
 };
 
 export const startTournament = async (tournamentUrl: string) => {
-    // The edge function unconditionally appends '.json', so we omit it here
-    const endpoint = `/tournaments/${tournamentUrl}/start`;
+    // v2.1 URL path is changed to PUT on state
+    const endpoint = `/tournaments/${tournamentUrl}/change_state`;
+
+    const payload = {
+        data: {
+            type: "TournamentState",
+            attributes: {
+                state: "start"
+            }
+        }
+    };
 
     const { data: responseData, error } = await supabase.functions.invoke('challonge-proxy', {
         body: { 
             endpoint, 
-            method: 'POST'
+            method: 'PUT',
+            body: JSON.stringify(payload)
         }
     });
 
@@ -146,5 +218,69 @@ export const startTournament = async (tournamentUrl: string) => {
         throw new Error(error.message || "Failed to start tournament on Challonge.");
     }
     
-    return responseData;
+    return responseData?.data;
+};
+
+// ===== Group Stage Functions (v2.1) =====
+
+export const fetchTournamentDetails = async (tournamentUrl: string) => {
+    const endpoint = `/tournaments/${tournamentUrl}`;
+    const { data, error } = await supabase.functions.invoke('challonge-proxy', {
+        body: { endpoint, method: 'GET' }
+    });
+
+    if (error) {
+        throw new Error(`Edge Function Error: ${error.message}`);
+    }
+    return data?.data;
+};
+
+export const startGroupStage = async (tournamentUrl: string) => {
+    const endpoint = `/tournaments/${tournamentUrl}/change_state`;
+    const payload = {
+        data: {
+            type: "TournamentState",
+            attributes: {
+                state: "start_group_stage"
+            }
+        }
+    };
+
+    const { data: responseData, error } = await supabase.functions.invoke('challonge-proxy', {
+        body: { 
+            endpoint, 
+            method: 'PUT',
+            body: JSON.stringify(payload)
+        }
+    });
+
+    if (error) {
+        throw new Error(error.message || "Failed to start group stage on Challonge.");
+    }
+    return responseData?.data;
+};
+
+export const finalizeGroupStage = async (tournamentUrl: string) => {
+    const endpoint = `/tournaments/${tournamentUrl}/change_state`;
+    const payload = {
+        data: {
+            type: "TournamentState",
+            attributes: {
+                state: "finalize_group_stage"
+            }
+        }
+    };
+
+    const { data: responseData, error } = await supabase.functions.invoke('challonge-proxy', {
+        body: { 
+            endpoint, 
+            method: 'PUT',
+            body: JSON.stringify(payload)
+        }
+    });
+
+    if (error) {
+        throw new Error(error.message || "Failed to finalize group stage on Challonge.");
+    }
+    return responseData?.data;
 };

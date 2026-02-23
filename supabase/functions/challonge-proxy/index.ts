@@ -33,18 +33,25 @@ Deno.serve(async (req: Request) => {
         }
 
         // We receive the raw endpoint path from the client e.g. "/tournaments/123/matches"
-        // Ensure it doesn't already have an api key, and construct the full URL
-        const urlObj = new URL(`https://api.challonge.com/v1${endpoint}.json`);
-        urlObj.searchParams.set('api_key', apiKey);
-
-        // If it's the open matches fetch, it might pass state=open etc via body or we can just pass them in the endpoint string
-        // If the client passed query parameters in the endpoint string like `/matches?state=open`, the URL constructor handles it.
-        // Actually, URL constructor with base `https://api.challonge.com/v1` handles `endpoint` cleanly.
-        
-        // 4. Execute Native Server Fetch
-        const fetchHeaders: Record<string, string> = {
-            'Accept': 'application/json'
+        // By default, route to v2.1. If the path explicitly calls /v1/, route cleanly.
+        let urlString = `https://api.challonge.com/v2.1${endpoint}`;
+        let fetchHeaders: Record<string, string> = {
+            'Accept': 'application/json',
+            'Authorization': `${apiKey}`,
+            'Content-Type': 'application/vnd.api+json' // JSON:API standard
         };
+
+        if (endpoint.startsWith('/v1/')) {
+            urlString = `https://api.challonge.com${endpoint}`;
+            const rawKey = apiKey.replace('Bearer ', '').trim();
+            const separator = urlString.includes('?') ? '&' : '?';
+            urlString = `${urlString}${separator}api_key=${rawKey}`;
+            
+            fetchHeaders = {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json'
+            };
+        }
 
         const fetchOptions: RequestInit = {
             method,
@@ -52,15 +59,19 @@ Deno.serve(async (req: Request) => {
         };
 
         if (body && (method === 'POST' || method === 'PUT')) {
-            fetchHeaders['Content-Type'] = 'application/x-www-form-urlencoded';
-            fetchOptions.body = body;
+            // Under JSON:API, the front end now passes a stringified JSON object
+            fetchOptions.body = typeof body === 'string' ? body : JSON.stringify(body);
         }
 
-        const externalResponse = await fetch(urlObj.toString(), fetchOptions);
+        const externalResponse = await fetch(urlString, fetchOptions);
         const externalData = await externalResponse.text();
 
+        // Supabase-js invokes swallow non-2xx body payloads by throwing generic errors.
+        // We pass 422 as 200 so the frontend can read the JSON:API validation errors perfectly.
+        const returnStatus = externalResponse.status === 422 ? 200 : externalResponse.status;
+
         return new Response(externalData, {
-            status: externalResponse.status,
+            status: returnStatus,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
 

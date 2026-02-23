@@ -139,7 +139,9 @@ export const TournamentHub: React.FC = () => {
                 prize_2nd: formPrize2nd || null,
                 prize_3rd: formPrize3rd || null,
                 status: formStatus,
-                registration_url: formRegistrationUrl || null
+                registration_url: formRegistrationUrl || null,
+                tournament_type: formTournamentType,
+                group_stages_enabled: formGroupStages && formTournamentType !== 'round robin'
             }]);
 
             if (dbError) throw dbError;
@@ -417,9 +419,17 @@ export const TournamentHub: React.FC = () => {
                                     <input 
                                         type="text" 
                                         required
+                                        pattern="^[a-zA-Z0-9_]+$"
+                                        title="Only letters, numbers, and underscores are allowed by Challonge"
                                         value={formChallongeUrl}
-                                        onChange={(e) => setFormChallongeUrl(e.target.value)}
-                                        placeholder="e.g. cocelitetest1"
+                                        onChange={(e) => {
+                                            const sanitized = e.target.value
+                                                .toLowerCase()
+                                                .replace(/\s+/g, '_')
+                                                .replace(/[^a-z0-9_]/g, '');
+                                            setFormChallongeUrl(sanitized);
+                                        }}
+                                        placeholder="e.g. coc_elite_test_1"
                                         className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-fuchsia-500/50 focus:bg-fuchsia-500/5 transition-colors"
                                     />
                                     <p className="text-slate-500 text-[10px] mt-1 italic">The alphanumeric ID at the end of the Challonge URL.</p>
@@ -505,10 +515,10 @@ export const TournamentHub: React.FC = () => {
                                             <option value="single elimination">Single Elimination</option>
                                             <option value="double elimination">Double Elimination</option>
                                             <option value="round robin">Round Robin</option>
-                                            <option value="swiss">Swiss System</option>
                                         </select>
                                     </div>
 
+                                    {formTournamentType !== 'round robin' && (
                                     <label className="flex items-center gap-3 bg-black/40 border border-white/5 p-4 rounded-xl cursor-pointer hover:border-fuchsia-500/30 transition-colors">
                                         <div className="relative flex items-center">
                                             <input 
@@ -524,6 +534,7 @@ export const TournamentHub: React.FC = () => {
                                             <span className="text-slate-500 text-xs">A two-stage tournament: Groups into Bracket</span>
                                         </div>
                                     </label>
+                                    )}
                                 </div>
 
                                 {creationError && (

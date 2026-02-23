@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { CustomBracket } from './CustomBracket';
 import { ArrowLeft, Trophy, Crown, X, AlertTriangle, RotateCcw, Settings, Users, Terminal, MonitorPlay, ChevronRight, RefreshCw, Loader2, Trash2 } from 'lucide-react';
-import { fetchParticipants, finalizeTournament, startTournament, fetchOpenMatches } from '../services/challongeService';
+import { fetchParticipants, finalizeTournament, startTournament, fetchOpenMatches, startGroupStage, finalizeGroupStage, fetchTournamentDetails } from '../services/challongeService';
 
 const TournamentPodium = ({ podiumData, tournament }: { podiumData: any[], tournament: any }) => {
     const renderRank = (rank: number, label: string, colorClass: string, iconColor: string, prizeStr: string | null) => {
@@ -81,6 +81,7 @@ export const TournamentView: React.FC = () => {
     const [showModPanel, setShowModPanel] = useState(false);
     const [registeredTeams, setRegisteredTeams] = useState<any[]>([]);
     const [isSyncing, setIsSyncing] = useState(false);
+    const [challongeState, setChallongeState] = useState<string>('');
 
     useEffect(() => {
         if (!challongeUrl) return;
@@ -119,6 +120,19 @@ export const TournamentView: React.FC = () => {
                 }
             };
             fetchTeams();
+
+            // Fetch Challonge state for group stage controls
+            if (tournament?.group_stages_enabled && tournament?.challonge_url) {
+                const fetchState = async () => {
+                    try {
+                        const details = await fetchTournamentDetails(tournament.challonge_url);
+                        setChallongeState(details?.attributes?.state || '');
+                    } catch (e) {
+                        console.warn('Could not fetch Challonge state:', e);
+                    }
+                };
+                fetchState();
+            }
         }
     }, [showModPanel, tournament]);
 
@@ -137,13 +151,15 @@ export const TournamentView: React.FC = () => {
                         .eq('tournament_id', data.id);
                         
                     const podium = participants
-                        .filter((p: any) => [1, 2, 3].includes(p.participant.final_rank))
+                        .filter((p: any) => p?.attributes && [1, 2, 3].includes(p.attributes.final_rank))
                         .map((p: any) => {
-                            const reg = regs?.find(r => r.challonge_participant_id === p.participant.id.toString());
+                            const pId = p.id.toString();
+                            const pAttrs = p.attributes;
+                            const reg = regs?.find(r => r.challonge_participant_id === pId);
                             const rosterData = reg?.rosters as any;
-                            const name = rosterData?.name || p.participant.name;
+                            const name = rosterData?.name || pAttrs.name;
                             const tag = rosterData?.tag || '';
-                            return { rank: p.participant.final_rank, name, tag, id: p.participant.id };
+                            return { rank: pAttrs.final_rank, name, tag, id: p.id };
                         });
                     setPodiumData(podium);
                 } catch (e) {
@@ -214,13 +230,37 @@ export const TournamentView: React.FC = () => {
     const handleStartTournament = async () => {
         setIsProcessing(true);
         try {
-            await startTournament(tournament.challonge_url);
-            const { error } = await supabase.from('tournaments').update({ status: 'active' }).eq('id', tournament.id);
-            if (error) throw error;
-            await fetchTournamentData();
-            alert("Tournament Started on Challonge!");
+            // If group stages enabled, start the group stage instead of the full tournament
+            if (tournament.group_stages_enabled) {
+                await startGroupStage(tournament.challonge_url);
+                const { error } = await supabase.from('tournaments').update({ status: 'active' }).eq('id', tournament.id);
+                if (error) throw error;
+                setChallongeState('group_stages_underway');
+                await fetchTournamentData();
+                alert('Group Stage Started on Challonge!');
+            } else {
+                await startTournament(tournament.challonge_url);
+                const { error } = await supabase.from('tournaments').update({ status: 'active' }).eq('id', tournament.id);
+                if (error) throw error;
+                await fetchTournamentData();
+                alert('Tournament Started on Challonge!');
+            }
         } catch (error: any) {
             alert(error.message);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    const handleFinalizeGroupStage = async () => {
+        setIsProcessing(true);
+        try {
+            await finalizeGroupStage(tournament.challonge_url);
+            setChallongeState('group_stages_finalized');
+            await fetchTournamentData();
+            alert('Group Stage Finalized! The elimination bracket will now generate.');
+        } catch (error: any) {
+            alert('Failed to finalize group stage: ' + error.message);
         } finally {
             setIsProcessing(false);
         }
@@ -456,6 +496,21 @@ export const TournamentView: React.FC = () => {
                                             <span className="flex items-center gap-3">
                                                 <RefreshCw size={18} className={`text-blue-500 ${isSyncing ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} /> 
                                                 {isSyncing ? 'SYNCING MATRIX...' : 'SYNC ALL MATCHES'}
+                                            </span>
+                                            <ChevronRight size={16} className="opacity-50" />
+                                        </button>
+                                    )}
+
+                                    {/* GROUP STAGE CONTROLS */}
+                                    {tournament.group_stages_enabled && challongeState === 'group_stages_underway' && (
+                                        <button 
+                                            onClick={handleFinalizeGroupStage}
+                                            disabled={isProcessing}
+                                            className="w-full flex items-center justify-between p-4 bg-amber-900/20 border border-amber-500/30 hover:bg-amber-800/40 hover:border-amber-400 text-amber-100 rounded-xl transition-all font-black tracking-widest text-sm shadow-[0_0_15px_rgba(245,158,11,0.1)] group disabled:opacity-50"
+                                        >
+                                            <span className="flex items-center gap-3">
+                                                <Trophy size={18} className="group-hover:scale-110 transition-transform text-amber-500" />
+                                                FINALIZE GROUP STAGE
                                             </span>
                                             <ChevronRight size={16} className="opacity-50" />
                                         </button>

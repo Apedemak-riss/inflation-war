@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, LayoutList, Trophy } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 // @ts-ignore
-import { SingleEliminationBracket, Match, SVGViewer, createTheme } from '@g-loot/react-tournament-brackets';
+import { SingleEliminationBracket, DoubleEliminationBracket, Match, SVGViewer, createTheme } from '@g-loot/react-tournament-brackets';
 import { StyleSheetManager } from 'styled-components';
 import { NeonBracketMatch } from './NeonBracketMatch';
-import { fetchParticipants } from '../services/challongeService'; // Wait, fetchOpenMatches fetches state=open. But for the full bracket we need ALL matches.
+import { fetchParticipants, fetchOpenMatches, fetchTournamentDetails } from '../services/challongeService'; 
 import { transformChallongeData } from '../utils/bracketTransforms';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -17,157 +18,26 @@ interface CustomBracketProps {
 
 export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isModerator = false }) => {
     const { user } = useAuth();
+    const navigate = useNavigate();
     const [matches, setMatches] = useState<any[]>([]);
+    const [participants, setParticipants] = useState<any[]>([]); // Added to cache for standings
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [userChallongeId, setUserChallongeId] = useState<string | null>(null);
     const [isCaptain, setIsCaptain] = useState<boolean>(false);
     const [activeMatches, setActiveMatches] = useState<Record<string, string>>({});
+    const [tournamentType, setTournamentType] = useState<string>('single elimination');
+    const [groupStagesEnabled, setGroupStagesEnabled] = useState(false);
+    const [groupStageState, setGroupStageState] = useState<string>(''); // 'group_stages_underway', 'group_stages_finalized', etc.
     
     // Phase 33: Registration Map
     const [rosterMap, setRosterMap] = useState<Record<string, string>>({});
+    // Phase 49: Participant Names Map
+    const [nameMap, setNameMap] = useState<Record<string, string>>({});
 
-    // Phase 39: Drag Panning State (React unmount fix)
+    // Container ref for positioning
     const containerRef = useRef<HTMLDivElement>(null);
-    const dragState = useRef({
-        isDragging: false,
-        startX: 0,
-        startY: 0,
-        scrollLeft: 0,
-        scrollTop: 0
-    });
 
-    // Phase 41: Zoom refs (kept for future mobile pinch support)
-    const svgRef = useRef<SVGSVGElement>(null);
-    const zoomState = useRef(1);
-    const lastPinchDistance = useRef<number | null>(null);
-
-    const handleMouseDown = (e: React.MouseEvent) => {
-        if (!containerRef.current) return;
-        dragState.current = {
-            isDragging: true,
-            startX: e.pageX - containerRef.current.offsetLeft,
-            startY: e.pageY - containerRef.current.offsetTop,
-            scrollLeft: containerRef.current.scrollLeft,
-            scrollTop: containerRef.current.scrollTop
-        };
-        containerRef.current.style.cursor = 'grabbing';
-    };
-
-    const handleMouseLeave = () => {
-        dragState.current.isDragging = false;
-        lastPinchDistance.current = null;
-        if (containerRef.current) containerRef.current.style.cursor = 'grab';
-    };
-
-    const handleMouseUp = () => {
-        dragState.current.isDragging = false;
-        lastPinchDistance.current = null;
-        if (containerRef.current) containerRef.current.style.cursor = 'grab';
-    };
-
-    const handleMouseMove = (e: React.MouseEvent) => {
-        if (!dragState.current.isDragging || !containerRef.current) return;
-        e.preventDefault();
-        
-        const x = e.pageX - containerRef.current.offsetLeft;
-        const y = e.pageY - containerRef.current.offsetTop;
-        const walkX = (x - dragState.current.startX) * 1; // 1:1 pan speed mapping
-        const walkY = (y - dragState.current.startY) * 1;
-        
-        containerRef.current.scrollLeft = dragState.current.scrollLeft - walkX;
-        containerRef.current.scrollTop = dragState.current.scrollTop - walkY;
-    };
-
-    // Phase 41: Native Event Listeners for smooth scaling without React State lag
-    useEffect(() => {
-        const container = containerRef.current;
-        if (!container) return;
-
-        const handleWheel = (e: WheelEvent) => {
-            if (e.shiftKey) { // Only zoom if holding shift (prevents interrupting normal scrolling elsewhere if present)
-                e.preventDefault();
-                const delta = e.deltaY * -0.001;
-                const newZoom = Math.min(Math.max(0.2, zoomState.current + delta), 3); // Bound between 20% and 300%
-                zoomState.current = newZoom;
-                
-                if (svgRef.current) {
-                    svgRef.current.style.transform = `scale(${newZoom})`;
-                    svgRef.current.style.transformOrigin = '0 0';
-                }
-            }
-        };
-
-        const handleTouchStart = (e: TouchEvent) => {
-            if (e.touches.length === 2) {
-                // Two fingers = zoom start
-                const t1 = e.touches[0];
-                const t2 = e.touches[1];
-                lastPinchDistance.current = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-            } else if (e.touches.length === 1 && containerRef.current) {
-                // One finger = pan start
-                const t = e.touches[0];
-                dragState.current = {
-                    isDragging: true,
-                    startX: t.clientX - containerRef.current.offsetLeft,
-                    startY: t.clientY - containerRef.current.offsetTop,
-                    scrollLeft: containerRef.current.scrollLeft,
-                    scrollTop: containerRef.current.scrollTop
-                };
-            }
-        };
-
-        const handleTouchMove = (e: TouchEvent) => {
-            if (e.touches.length === 2 && lastPinchDistance.current !== null) {
-                // Handle Mobile Pinch Zoom
-                e.preventDefault(); // Stop screen from zooming
-                const t1 = e.touches[0];
-                const t2 = e.touches[1];
-                const currentDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-                
-                const delta = (currentDist - lastPinchDistance.current) * 0.005;
-                const newZoom = Math.min(Math.max(0.2, zoomState.current + delta), 3);
-                
-                zoomState.current = newZoom;
-                lastPinchDistance.current = currentDist;
-
-                if (svgRef.current) {
-                    svgRef.current.style.transform = `scale(${newZoom})`;
-                    svgRef.current.style.transformOrigin = '0 0';
-                }
-            } else if (e.touches.length === 1 && dragState.current.isDragging && containerRef.current) {
-                // Handle Mobile Panning
-                e.preventDefault(); // Stop vertical scroll bounce
-                const t = e.touches[0];
-                const x = t.clientX - containerRef.current.offsetLeft;
-                const y = t.clientY - containerRef.current.offsetTop;
-                const walkX = x - dragState.current.startX;
-                const walkY = y - dragState.current.startY;
-                
-                containerRef.current.scrollLeft = dragState.current.scrollLeft - walkX;
-                containerRef.current.scrollTop = dragState.current.scrollTop - walkY;
-            }
-        };
-
-        const handleTouchEnd = () => {
-            lastPinchDistance.current = null;
-            dragState.current.isDragging = false;
-        };
-
-        container.addEventListener('wheel', handleWheel, { passive: false });
-        container.addEventListener('touchstart', handleTouchStart, { passive: false });
-        container.addEventListener('touchmove', handleTouchMove, { passive: false });
-        container.addEventListener('touchend', handleTouchEnd);
-        container.addEventListener('touchcancel', handleTouchEnd);
-
-        return () => {
-            container.removeEventListener('wheel', handleWheel);
-            container.removeEventListener('touchstart', handleTouchStart);
-            container.removeEventListener('touchmove', handleTouchMove);
-            container.removeEventListener('touchend', handleTouchEnd);
-            container.removeEventListener('touchcancel', handleTouchEnd);
-        };
-    }, []);
 
     useEffect(() => {
         const fetchUserChallongeId = async () => {
@@ -252,29 +122,40 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
         if (!tournamentUrl) return;
         setLoading(true);
         try {
-            const timestamp = new Date().getTime();
-            const endpoint = `/tournaments/${tournamentUrl}/matches.json?_=${timestamp}`;
-            
-            const matchesPromise = supabase.functions.invoke('challonge-proxy', {
-                body: { endpoint, method: 'GET' }
-            }).then(({ data, error }) => {
-                if (error) throw new Error(`Edge Function Error: ${error.message}`);
-                return data;
-            });
+            // We MUST use the v1 API for matches because v2.1 explicitly destroys all `prerequisite_match_ids` needed for tree maps.
+            const matchesPromise = fetchOpenMatches(tournamentUrl);
 
             const [matchesRes, participantsData] = await Promise.all([
                 matchesPromise,
                 fetchParticipants(tournamentUrl)
             ]);
             
-            let nameMap: Record<string, string> = {};
+            setParticipants(participantsData);
             
             const { data: tData } = await supabase.from('tournaments')
-                .select('id')
+                .select('id, tournament_type, group_stages_enabled')
                 .eq('challonge_url', tournamentUrl)
                 .single();
             
             if (tData) {
+                if (tData.tournament_type) {
+                    setTournamentType(tData.tournament_type.toLowerCase());
+                }
+                setGroupStagesEnabled(!!tData.group_stages_enabled);
+
+                // Fetch Challonge tournament state for group stage status
+                if (tData.group_stages_enabled) {
+                    try {
+                        const challongeDetails = await fetchTournamentDetails(tournamentUrl);
+                        const state = challongeDetails?.attributes?.state || '';
+                        setGroupStageState(state);
+                    } catch (e) {
+                        console.warn('Could not fetch tournament state from Challonge:', e);
+                    }
+                } else {
+                    setGroupStageState('');
+                }
+
                 const { data: regs } = await supabase.from('tournament_registrations')
                     .select('challonge_participant_id, roster_id, rosters(name)')
                     .eq('tournament_id', tData.id);
@@ -290,12 +171,13 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
                         }
                     });
                     setRosterMap(rMap);
-                    nameMap = nMap;
+                    setNameMap(nMap);
                 }
             }
 
-            const transformed = transformChallongeData(matchesRes, participantsData, nameMap);
-            setMatches(transformed);
+            // Using the updated v2.1 transformations
+            const transformed = transformChallongeData(participantsData, matchesRes);
+            setMatches(transformed.matches);
             setError(null);
         } catch (err: any) {
             console.error("Bracket Load Error:", err);
@@ -359,11 +241,482 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
         },
         connectorColor: 'rgba(255,255,255,0.1)',
         connectorColorHighlight: '#ef4444',
-        svgBackground: 'transparent'
+        svgBackground: '#050b14'
     });
 
+    // Determine Bracket Layout Types
+    const isDoubleElimination = tournamentType === 'double elimination';
+    const isRoundRobin = tournamentType === 'round robin';
+
+    const commonBracketOptions = {
+        style: {
+            roundHeader: { 
+                backgroundColor: '#0a101f', 
+                fontColor: '#FBBF24', 
+                fontFamily: '"Outfit", sans-serif',
+                marginBottom: 20 
+            },
+            connectorColor: 'rgba(255,255,255,0.1)',
+            connectorColorHighlight: '#ef4444',
+            width: 440,
+            matchWidth: 440,
+            boxHeight: 260,
+            canvasPadding: 80
+        }
+    };
+
+    const renderBracketOrStandings = () => {
+        // ============================================
+        // GROUP STAGE VIEW — Show group standings tables
+        // ============================================
+        if (groupStagesEnabled && groupStageState === 'group_stages_underway') {
+            // Parse groups from match data — Challonge v1 includes group_id on matches
+            const groupMap: Record<string, Set<string>> = {};
+            const rawMatches = matches.length > 0 ? matches : [];
+            
+            // Build participant groups from match pairings
+            // For v1 API matches, the group_id field indicates which group a match belongs to
+            // For participants, group_id is on the participant object
+            participants.forEach((p: any) => {
+                const pid = (p.id || p.attributes?.id)?.toString();
+                const groupId = p.attributes?.group_id || p.group_id || 'A';
+                const gKey = `Group ${String.fromCharCode(65 + (parseInt(groupId) - 1) || 0)}`;
+                if (!groupMap[gKey]) groupMap[gKey] = new Set();
+                if (pid) groupMap[gKey].add(pid);
+            });
+
+            // If no groups detected, show all participants in one group
+            if (Object.keys(groupMap).length === 0) {
+                groupMap['Group A'] = new Set(participants.map((p: any) => (p.id || p.attributes?.id)?.toString()).filter(Boolean));
+            }
+
+            // Calculate stats per participant from matches
+            const allStats: Record<string, { name: string; wins: number; losses: number; points: number; group: string }> = {};
+            
+            participants.forEach((p: any) => {
+                const pid = (p.id || p.attributes?.id)?.toString();
+                const pName = p.attributes?.name || p.name || nameMap[pid] || `Team ${pid}`;
+                const groupId = p.attributes?.group_id || p.group_id || '1';
+                const gKey = `Group ${String.fromCharCode(65 + (parseInt(groupId) - 1) || 0)}`;
+                if (pid) {
+                    allStats[pid] = { name: pName, wins: 0, losses: 0, points: 0, group: gKey };
+                }
+            });
+
+            // Count wins/losses from completed matches
+            rawMatches.forEach((m: any) => {
+                const matchData = m.match || m;
+                if (matchData.state !== 'complete') return;
+                const winnerId = matchData.winner_id?.toString();
+                const p1 = matchData.player1_id?.toString();
+                const p2 = matchData.player2_id?.toString();
+                if (winnerId && p1 && p2) {
+                    const loserId = winnerId === p1 ? p2 : p1;
+                    if (allStats[winnerId]) { allStats[winnerId].wins++; allStats[winnerId].points += 3; }
+                    if (allStats[loserId]) { allStats[loserId].losses++; }
+                }
+            });
+
+            // Organize into groups
+            const groups: Record<string, typeof allStats[string][]> = {};
+            Object.values(allStats).forEach(stat => {
+                if (!groups[stat.group]) groups[stat.group] = [];
+                groups[stat.group].push(stat);
+            });
+
+            // Sort each group by points desc, then wins desc
+            Object.keys(groups).forEach(g => {
+                groups[g].sort((a, b) => b.points - a.points || b.wins - a.wins);
+            });
+
+            const sortedGroupKeys = Object.keys(groups).sort();
+
+            return (
+                <div className="p-6 space-y-6">
+                    <div className="text-center mb-6">
+                        <div className="inline-flex items-center gap-2 px-4 py-2 bg-amber-950/40 border border-amber-500/30 rounded-xl">
+                            <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
+                            <span className="text-amber-400 font-black text-xs tracking-[0.2em] uppercase">Group Stage in Progress</span>
+                        </div>
+                    </div>
+                    <div className={`grid gap-6 ${sortedGroupKeys.length > 1 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 max-w-2xl mx-auto'}`}>
+                        {sortedGroupKeys.map(groupName => (
+                            <div key={groupName} className="bg-black/40 border border-white/10 rounded-2xl overflow-hidden">
+                                <div className="px-5 py-3 bg-gradient-to-r from-fuchsia-950/40 to-transparent border-b border-white/5">
+                                    <h3 className="text-white font-black tracking-[0.15em] uppercase text-sm">{groupName}</h3>
+                                </div>
+                                <table className="w-full">
+                                    <thead>
+                                        <tr className="text-slate-500 text-xs uppercase tracking-wider">
+                                            <th className="text-left px-5 py-3 font-mono">#</th>
+                                            <th className="text-left px-5 py-3 font-mono">Team</th>
+                                            <th className="text-center px-3 py-3 font-mono">W</th>
+                                            <th className="text-center px-3 py-3 font-mono">L</th>
+                                            <th className="text-center px-3 py-3 font-mono">PTS</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {groups[groupName].map((stat, idx) => (
+                                            <tr key={stat.name} className={`border-t border-white/5 transition-colors hover:bg-white/5 ${idx < 2 ? 'bg-emerald-950/10' : ''}`}>
+                                                <td className="px-5 py-3 text-slate-600 font-mono text-sm">{idx + 1}</td>
+                                                <td className="px-5 py-3">
+                                                    <span className="text-white font-bold text-sm tracking-wide">{stat.name}</span>
+                                                </td>
+                                                <td className="text-center px-3 py-3 text-emerald-400 font-mono font-bold">{stat.wins}</td>
+                                                <td className="text-center px-3 py-3 text-red-400 font-mono font-bold">{stat.losses}</td>
+                                                <td className="text-center px-3 py-3 text-amber-400 font-mono font-black">{stat.points}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        }
+
+        if (isRoundRobin) {
+            // ============================================
+            // STANDINGS ALGORITHM (For formats @g-loot doesn't support natively)
+            // ============================================
+            
+            // 1. Calculate Stats
+            const stats = participants.map(p => {
+                let wins = 0;
+                let losses = 0;
+                let ties = 0;
+                let points = 0;
+                
+                matches.forEach(m => {
+                    if (m.state !== 'complete') return;
+                    
+                    const p1 = m.participants[0];
+                    const p2 = m.participants[1];
+                    
+                    if (p1 && p1.id === p.id) {
+                        if (p1.isWinner) { wins++; points += 3; }
+                        else if (!p2?.isWinner && p1.resultText === p2?.resultText && p1.resultText !== null) { ties++; points += 1; }
+                        else { losses++; }
+                    } else if (p2 && p2.id === p.id) {
+                        if (p2.isWinner) { wins++; points += 3; }
+                        else if (!p1?.isWinner && p1?.resultText === p2.resultText && p2.resultText !== null) { ties++; points += 1; }
+                        else { losses++; }
+                    }
+                });
+                
+                return {
+                    ...p,
+                    stats: { wins, losses, ties, points },
+                    rank: p.final_rank || p.seed || 999 
+                };
+            });
+
+            // 2. Sort Standings
+            stats.sort((a, b) => {
+                if (a.rank !== b.rank) return a.rank - b.rank;
+                if (b.stats.points !== a.stats.points) return b.stats.points - a.stats.points;
+                return b.stats.wins - a.stats.wins;
+            });
+            
+            return (
+                <div className="p-8 w-full max-w-6xl mx-auto space-y-12">
+                    {/* Standings Table */}
+                    <div className="bg-[#0a101f] border border-white/5 shadow-2xl rounded-2xl overflow-hidden">
+                        <div className="bg-gradient-to-r from-red-600/20 to-orange-500/20 px-8 py-6 border-b border-white/5 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <Trophy className="w-6 h-6 text-yellow-500" />
+                                <h3 className="text-xl font-bold font-outfit tracking-wider text-white uppercase">{tournamentType} STANDINGS</h3>
+                            </div>
+                            <div className="text-slate-400 text-sm tracking-widest font-medium uppercase">
+                                Top {stats.length} Teams
+                            </div>
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse">
+                                <thead>
+                                    <tr className="bg-black/40 text-slate-400 text-sm uppercase tracking-wider font-semibold border-b border-white/5">
+                                        <th className="py-4 px-8 w-24 text-center">Rank</th>
+                                        <th className="py-4 px-8">Team</th>
+                                        <th className="py-4 px-8 text-center w-32">W-L-T</th>
+                                        <th className="py-4 px-8 text-center w-32">Points</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {stats.map((team, index) => {
+                                        const rosterId = rosterMap[team.id];
+                                        const displayName = nameMap[team.id] || team.name || `Team ${team.id}`;
+                                        const isMyTeam = userChallongeId && String(userChallongeId) === String(rosterId);
+                                        
+                                        return (
+                                            <tr key={team.id} className={`border-b border-white/5 transition-colors ${
+                                                isMyTeam ? 'bg-red-500/10 hover:bg-red-500/20' : 'hover:bg-white/5'
+                                            }`}>
+                                                <td className="py-5 px-8 text-center">
+                                                    <div className={`inline-flex items-center justify-center w-8 h-8 rounded-full font-bold ${
+                                                        index === 0 ? 'bg-yellow-500/20 text-yellow-500 border border-yellow-500/50' :
+                                                        index === 1 ? 'bg-slate-300/20 text-slate-300 border border-slate-300/50' :
+                                                        index === 2 ? 'bg-amber-700/20 text-amber-600 border border-amber-700/50' :
+                                                        'bg-white/5 text-slate-400'
+                                                    }`}>
+                                                        {index + 1}
+                                                    </div>
+                                                </td>
+                                                <td className="py-5 px-8">
+                                                    <span className={`font-semibold tracking-wide ${isMyTeam ? 'text-red-400' : 'text-slate-200'}`}>
+                                                        {displayName}
+                                                    </span>
+                                                    {isMyTeam && (
+                                                        <span className="ml-3 text-[10px] uppercase tracking-wider font-bold text-red-500 bg-red-500/10 px-2 py-1 rounded-sm border border-red-500/20">Your Team</span>
+                                                    )}
+                                                </td>
+                                                <td className="py-5 px-8 text-center font-mono text-slate-300">
+                                                    {team.stats.wins}-{team.stats.losses}-{team.stats.ties}
+                                                </td>
+                                                <td className="py-5 px-8 text-center font-bold text-white text-lg">
+                                                    {team.stats.points}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* Chronological Matches (List instead of Bracket) */}
+                    <div>
+                        <div className="flex items-center gap-3 mb-6 px-2">
+                            <LayoutList className="w-6 h-6 text-red-500" />
+                            <h3 className="text-xl font-bold font-outfit tracking-wider text-white uppercase">Match Schedule</h3>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {matches.map(match => {
+                                const matchIsOpen = match.state === 'SCHEDULED' || match.state === 'open' || match.state === 'pending';
+                                const topRosterId = rosterMap[match.participants[0]?.id];
+                                const bottomRosterId = rosterMap[match.participants[1]?.id];
+                                const isPlayerInMatch = Boolean(userChallongeId && (topRosterId === userChallongeId || bottomRosterId === userChallongeId));
+                                const liveLobbyCode = activeMatches[match.id];
+
+                                return (
+                                    <div key={match.id} className="relative transform hover:scale-[1.02] transition-all duration-300">
+                                        <div className="bg-black/40 border border-[#3b4b68]/50 rounded-xl p-4 shadow-lg flex flex-col justify-around gap-2 h-28 relative">
+                                            {/* Top Participant */}
+                                            <div className={`flex justify-between items-center px-3 py-1.5 rounded-md ${match.participants[0]?.isWinner ? 'bg-green-500/10 border border-green-500/20' : 'bg-white/5 border border-transparent'}`}>
+                                                <span className={`font-semibold font-outfit truncate pr-2 ${match.participants[0]?.isWinner ? 'text-green-400' : 'text-slate-300'}`}>
+                                                    {match.participants[0]?.name || 'TBD'}
+                                                </span>
+                                                <span className={`font-mono font-bold ${match.participants[0]?.isWinner ? 'text-green-400' : 'text-slate-500'}`}>
+                                                    {match.participants[0]?.resultText || '-'}
+                                                </span>
+                                            </div>
+                                            {/* Bottom Participant */}
+                                            <div className={`flex justify-between items-center px-3 py-1.5 rounded-md ${match.participants[1]?.isWinner ? 'bg-green-500/10 border border-green-500/20' : 'bg-white/5 border border-transparent'}`}>
+                                                <span className={`font-semibold font-outfit truncate pr-2 ${match.participants[1]?.isWinner ? 'text-green-400' : 'text-slate-300'}`}>
+                                                    {match.participants[1]?.name || 'TBD'}
+                                                </span>
+                                                <span className={`font-mono font-bold ${match.participants[1]?.isWinner ? 'text-green-400' : 'text-slate-500'}`}>
+                                                    {match.participants[1]?.resultText || '-'}
+                                                </span>
+                                            </div>
+                                            {/* Match Round Label */}
+                                            <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#0a101f] border border-[#3b4b68] text-yellow-500 text-[9px] uppercase tracking-widest px-2 py-0.5 rounded-full">
+                                                {match.tournamentRoundText || 'Match'}
+                                            </div>
+
+                                            {/* ACTION BUTTONS (Lobbies) */}
+                                            {!liveLobbyCode && isCaptain && isPlayerInMatch && matchIsOpen && (
+                                                <button
+                                                    onClick={async (e) => {
+                                                        e.stopPropagation();
+                                                        try {
+                                                            if (!topRosterId || !bottomRosterId) {
+                                                                alert("Competitors have not synced via Tournament Registrations Matrix.");
+                                                                return;
+                                                            }
+                                                            const { data: lobbyCode, error } = await supabase.rpc('create_lobby', {
+                                                                p_lobby_name: `TNK-${String(match.id).slice(-4)}`,
+                                                                p_team_a_roster_id: topRosterId,
+                                                                p_team_b_roster_id: bottomRosterId,
+                                                                p_challonge_match_id: String(match.id)
+                                                            });
+                                                            if (error) throw error;
+                                                            if (lobbyCode) {
+                                                                const codeToJoin = typeof lobbyCode === 'object' ? (lobbyCode.code || lobbyCode.id) : lobbyCode;
+                                                                navigate(`/join/${codeToJoin}`);
+                                                            }
+                                                        } catch (err: any) {
+                                                            console.error('Error creating lobby:', err);
+                                                            alert('Failed to create lobby: ' + err.message);
+                                                        }
+                                                    }}
+                                                    className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-slate-900 border border-sky-500/50 text-sky-400 hover:bg-sky-500/20 hover:text-white hover:border-sky-400 text-[10px] uppercase font-bold px-4 py-1 rounded-full shadow-[0_0_10px_rgba(56,189,248,0.2)] transition-all z-10"
+                                                >
+                                                    CREATE LOBBY
+                                                </button>
+                                            )}
+                                            {liveLobbyCode && (
+                                                <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 flex items-center justify-center gap-2 z-10 w-max">
+                                                    {isPlayerInMatch && (
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                navigate(`/join/${liveLobbyCode}`);
+                                                            }}
+                                                            className="bg-red-500/10 border border-red-500/50 text-red-500 hover:bg-red-500/20 hover:text-white hover:border-red-400 text-[10px] uppercase font-bold px-4 py-1 rounded-full shadow-[0_0_10px_rgba(239,68,68,0.2)] transition-all"
+                                                        >
+                                                            JOIN LOBBY
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            navigate(`/stream/${liveLobbyCode}`);
+                                                        }}
+                                                        className="bg-purple-500/10 border border-purple-500/50 text-purple-400 hover:bg-purple-500/20 hover:text-white hover:border-purple-400 text-[10px] uppercase font-bold px-4 py-1 rounded-full shadow-[0_0_10px_rgba(168,85,247,0.2)] transition-all"
+                                                    >
+                                                        WATCH
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                        {/* LOBBY INDICATOR LAYERED OVER */}
+                                        {liveLobbyCode && (
+                                            <div className="absolute -top-3 -right-3">
+                                                <div className="relative">
+                                                    <div className="absolute inset-0 bg-red-500 blur animate-pulse rounded-full opacity-50"></div>
+                                                    <div className="relative bg-black border border-red-500/50 text-red-500 text-[10px] font-bold tracking-widest uppercase px-3 py-1.5 rounded-full shadow-lg flex items-center gap-2">
+                                                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping"></span>
+                                                        Live
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        if (isDoubleElimination && matches.some(m => m.tournamentRound < 0)) {
+            // @g-loot Double Elimination expects an object { upper: [], lower: [] }
+            // In Challonge, upper bracket matches have a positive tournamentRound, lower bracket matches have negative.
+            const doubleElimMatches = {
+                upper: matches.filter(m => m.tournamentRound >= 0),
+                lower: matches.filter(m => m.tournamentRound < 0)
+            };
+
+            return (
+                <DoubleEliminationBracket
+                    matches={doubleElimMatches} 
+                    matchComponent={NeonBracketMatch}
+                    theme={theme}
+                    options={commonBracketOptions}
+                    svgWrapper={({ children, ...props }: React.PropsWithChildren<any>) => {
+                        const baseW = Number(props.bracketWidth || props.width) || 10000;
+                        const baseH = Number(props.bracketHeight || props.height) || 5000;
+                        const finalW = Math.max(baseW + 1200, 2000);
+                        const finalH = Math.max(baseH + 600, 1000);
+                        const { bracketWidth, bracketHeight, width, height, ...restProps } = props;
+                        
+                        return (
+                            <div 
+                                ref={containerRef}
+                                className="bracket-scroll-container w-full h-[85vh] overflow-hidden bg-[#050b14] relative"
+                            >
+                                <SVGViewer 
+                                    {...restProps}
+                                    width={finalW} 
+                                    height={finalH}
+                                    bracketWidth={finalW}
+                                    bracketHeight={finalH}
+                                    background="#050b14"
+                                    SVGBackground="#050b14"
+                                    detectAutoPan={false}
+                                    scaleFactorOnWheel={1.06}
+                                    onPan={() => {}}
+                                    onZoom={() => {}}
+                                    className="transform-gpu"
+                                >
+                                    {children}
+                                </SVGViewer>
+                                {isModerator && (
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); handleRefreshBracket(); }}
+                                        className="absolute top-3 right-3 z-50 p-2 bg-black/60 border border-white/10 hover:border-white/30 rounded-lg text-slate-400 hover:text-white transition-all backdrop-blur-sm"
+                                        title="Refresh Bracket"
+                                    >
+                                        <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} />
+                                    </button>
+                                )}
+                            </div>
+                        );
+                    }}
+                />
+            );
+        }
+
+        // Default Single Elimination
+        // Safety check to prevent library crash if array lacks structured IDs
+        if (matches.length === 0) {
+            return <div className="text-slate-500 p-12 text-center text-xs tracking-widest uppercase">Single Elim Bracket Generation Pending</div>;
+        }
+
+        return (
+            <SingleEliminationBracket
+                matches={matches}
+                matchComponent={NeonBracketMatch}
+                theme={theme}
+                options={commonBracketOptions}
+                svgWrapper={({ children, ...props }: React.PropsWithChildren<any>) => {
+                    const baseW = Number(props.bracketWidth || props.width) || 10000;
+                    const baseH = Number(props.bracketHeight || props.height) || 2000;
+                    const finalW = Math.max(baseW + 800, 1500);
+                    const finalH = Math.max(baseH + 400, 800);
+                    const { bracketWidth, bracketHeight, width, height, ...restProps } = props;
+
+                    return (
+                        <div 
+                            ref={containerRef}
+                            className="bracket-scroll-container w-full h-[85vh] overflow-hidden bg-[#050b14] relative"
+                        >
+                            <SVGViewer 
+                                {...restProps}
+                                width={finalW} 
+                                height={finalH}
+                                bracketWidth={finalW}
+                                bracketHeight={finalH}
+                                background="#050b14"
+                                SVGBackground="#050b14"
+                                detectAutoPan={false}
+                                scaleFactorOnWheel={1.06}
+                                onPan={() => {}}
+                                onZoom={() => {}}
+                                className="transform-gpu"
+                            >
+                                {children}
+                            </SVGViewer>
+                            {isModerator && (
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); handleRefreshBracket(); }}
+                                    className="absolute top-3 right-3 z-50 p-2 bg-black/60 border border-white/10 hover:border-white/30 rounded-lg text-slate-400 hover:text-white transition-all backdrop-blur-sm"
+                                    title="Refresh Bracket"
+                                >
+                                    <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} />
+                                </button>
+                            )}
+                        </div>
+                    );
+                }}
+            />
+        );
+    };
+
     return (
-        <div className="w-full h-full bg-[#050b14] rounded-2xl border border-white/5 shadow-2xl">
+        <div className="w-full h-full bg-[#050b14] rounded-2xl border border-white/5 shadow-2xl relative overflow-hidden">
             {/* CSS to hide scrollbars while keeping scroll functionality */}
             <style>{`
                 .bracket-scroll-container {
@@ -374,6 +727,16 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
                     display: none; /* Chrome/Safari/Opera */
                 }
             `}</style>
+            
+            {/* Action Bar Overlay */}
+            <div className="absolute top-4 right-4 z-50 flex items-center gap-3">
+                {isRefreshing && (
+                    <span className="text-red-500 font-mono text-xs uppercase tracking-widest animate-pulse">
+                        Syncing...
+                    </span>
+                )}
+            </div>
+
             <StyleSheetManager shouldForwardProp={(prop) => !['won', 'hovered', 'highlighted', 'bottomHovered', 'topHovered'].includes(prop)}>
                 <BracketContext.Provider value={{ 
                     currentUserChallongeId: userChallongeId,
@@ -382,50 +745,7 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
                     activeMatches,
                     rosterMap
                 }}>
-                    <SingleEliminationBracket
-                        matches={matches}
-                        matchComponent={NeonBracketMatch}
-                        theme={theme}
-                        options={{
-                            style: {
-                                roundHeader: { 
-                                    backgroundColor: '#0a101f', 
-                                    fontColor: '#FBBF24', 
-                                    fontFamily: '"Outfit", sans-serif',
-                                    marginBottom: 20 
-                                },
-                                connectorColor: 'rgba(255,255,255,0.1)',
-                                connectorColorHighlight: '#ef4444',
-                                width: 440,
-                                matchWidth: 440,
-                                boxHeight: 260,
-                                canvasPadding: 80
-                            }
-                        }}
-                        svgWrapper={({ children }: React.PropsWithChildren<any>) => {
-                            return (
-                                <div 
-                                    ref={containerRef}
-                                    onMouseDown={handleMouseDown}
-                                    onMouseLeave={handleMouseLeave}
-                                    onMouseUp={handleMouseUp}
-                                    onMouseMove={handleMouseMove}
-                                    className="bracket-scroll-container w-full h-[85vh] overflow-auto bg-[#050b14] relative cursor-grab active:cursor-grabbing"
-                                >
-                                    {children}
-                                    {isModerator && (
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); handleRefreshBracket(); }}
-                                            className="absolute top-3 right-3 z-50 p-2 bg-black/60 border border-white/10 hover:border-white/30 rounded-lg text-slate-400 hover:text-white transition-all backdrop-blur-sm"
-                                            title="Refresh Bracket"
-                                        >
-                                            <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} />
-                                        </button>
-                                    )}
-                                </div>
-                            );
-                        }}
-                    />
+                    {renderBracketOrStandings()}
                 </BracketContext.Provider>
             </StyleSheetManager>
         </div>
