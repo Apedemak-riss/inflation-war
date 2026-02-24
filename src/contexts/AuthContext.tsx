@@ -80,15 +80,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // ── 1. Listen for auth changes (MUST be registered BEFORE getSession) ──
     // This ensures INITIAL_SESSION event is captured even with StrictMode shenanigans
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, newSession) => {
+      (event, newSession) => {
         if (!isMounted) return;
         console.log('[AuthContext] onAuthStateChange:', event);
 
         setSession(newSession);
         setUser(newSession?.user ?? null);
 
+        // CRITICAL: Do NOT await fetchProfile here synchronously.
+        // Supabase's auth client blocks updateUser() from resolving until this
+        // callback finishes. If we await a DB call inside the callback,
+        // we create a deadlock (updateUser waits for callback → callback waits for fetch).
+        // Using setTimeout(0) defers the fetch to break the synchronous chain.
         if (newSession?.user) {
-          await fetchProfile(newSession.user.id);
+          setTimeout(() => {
+            if (isMounted) fetchProfile(newSession.user.id);
+          }, 0);
         } else {
           setProfile(null);
         }
