@@ -14,8 +14,31 @@ export const fetchParticipants = async (tournamentId: string) => {
     if (error) {
         throw new Error(`Edge Function Error: ${error.message}`);
     }
+
+    const v2Data = data?.data || [];
+
+    // Challonge v2.1 drops the group_player_ids array which maps match IDs to participant IDs.
+    // We seamlessly fetch the v1 data right here and merge it into the v2 participant objects.
+    try {
+        const v1Endpoint = `/v1/tournaments/${tournamentId}/participants.json`;
+        const { data: v1Data, error: v1Error } = await supabase.functions.invoke('challonge-proxy', {
+            body: { endpoint: v1Endpoint, method: 'GET' }
+        });
+        
+        if (!v1Error && Array.isArray(v1Data)) {
+            v2Data.forEach((p: any) => {
+                const v1Match = v1Data.find((v1: any) => v1.participant?.id?.toString() === p.id?.toString());
+                if (v1Match && v1Match.participant?.group_player_ids) {
+                    p.group_player_ids = v1Match.participant.group_player_ids;
+                }
+            });
+        }
+    } catch (e) {
+        console.warn('Silent fail fetching v1 participant mappings', e);
+    }
+
     // Return the data array internally wrapped by JSON:API
-    return data?.data || [];
+    return v2Data;
 };
 
 export const fetchOpenMatches = async (tournamentId: string) => {
@@ -75,6 +98,9 @@ export const reportMatchScore = async (
         }
     });
 
+    console.log('[API_DEBUG_CHALLONGE] reportMatchScore Payload:', JSON.stringify(payload, null, 2));
+    console.log('[API_DEBUG_CHALLONGE] reportMatchScore Response:', { data, error });
+
     if (error) {
         throw new Error(`Edge Function Error Updating Match: ${error.message}`);
     }
@@ -110,18 +136,18 @@ export const finalizeTournament = async (tournamentId: string) => {
     return data?.data;
 };
 
-export const createTournament = async (tournamentData: { name: string, url: string, tournamentType: string, groupStagesEnabled: boolean }) => {
+export const createTournament = async (tournamentData: { name: string, url: string, tournamentType: string, groupStagesEnabled: boolean, groupSize?: number, advancePerGroup?: number }) => {
     const endpoint = '/tournaments';
     
     // JSON:API Tournament Creation Structure
     const payload: any = {
         data: {
-            type: "Tournaments",
+            type: "tournament",
             attributes: {
                 name: tournamentData.name,
                 url: tournamentData.url,
                 tournament_type: tournamentData.tournamentType,
-                group_stages_enabled: tournamentData.groupStagesEnabled
+                group_stage_enabled: tournamentData.groupStagesEnabled
             }
         }
     };
@@ -133,6 +159,17 @@ export const createTournament = async (tournamentData: { name: string, url: stri
         };
     }
 
+    // Only send group_stage_enabled flag at creation time.
+    // Do NOT send group_stage_options here — Challonge v2.1 API has strict validation
+    // (powers of 2 for advance count, ranked_by must be filled, etc.) that conflicts
+    // with flexible configuration. Group stage settings will use Challonge defaults
+    // (4 per group, top 2 advance, round robin) and can be adjusted:
+    // 1. Via the Challonge website tournament settings page
+    // 2. Via the Advanced Options modal (PUT update after creation)
+    // 3. Via the moderator panel in TournamentView before starting
+
+    console.log('[Challonge] createTournament payload:', JSON.stringify(payload, null, 2));
+
     const { data: responseData, error } = await supabase.functions.invoke('challonge-proxy', {
         body: { 
             endpoint, 
@@ -140,6 +177,13 @@ export const createTournament = async (tournamentData: { name: string, url: stri
             body: JSON.stringify(payload)
         }
     });
+
+    // Log the FULL response to see if group_stage_enabled was accepted
+    console.log('[Challonge] createTournament FULL response:', JSON.stringify(responseData, null, 2));
+    if (responseData?.data?.attributes) {
+        console.log('[Challonge] group_stage_enabled in response:', responseData.data.attributes.group_stage_enabled);
+        console.log('[Challonge] group_stage_options in response:', JSON.stringify(responseData.data.attributes.group_stage_options));
+    }
 
     if (error) {
         // Because Supabase Client intercepts HTTP 4xx/5xx and scrubs the payload,
@@ -281,6 +325,58 @@ export const finalizeGroupStage = async (tournamentUrl: string) => {
 
     if (error) {
         throw new Error(error.message || "Failed to finalize group stage on Challonge.");
+    }
+    return responseData?.data;
+};
+
+export const randomizeParticipants = async (tournamentUrl: string) => {
+    // Note: We use the v1 API for randomize because v2.1 requires complex JSON:API payload
+    // and v1 is just a simple POST with no body needed.
+    const endpoint = `/v1/tournaments/${tournamentUrl}/participants/randomize.json`;
+    const { data: responseData, error } = await supabase.functions.invoke('challonge-proxy', {
+        body: { 
+            endpoint, 
+            method: 'POST' // v1 randomize is a POST
+        }
+    });
+
+    if (error) {
+        throw new Error(error.message || "Failed to randomize/seed participants on Challonge.");
+    }
+    return responseData;
+};
+
+export const toggleGroupStage = async (
+    tournamentUrl: string, 
+    enabled: boolean
+) => {
+    const endpoint = `/tournaments/${tournamentUrl}`;
+    const payload = {
+        data: {
+            type: "tournament",
+            attributes: {
+                group_stage_enabled: enabled,
+            }
+        }
+    };
+
+    console.log('[Challonge] toggleGroupStage payload:', JSON.stringify(payload, null, 2));
+
+    const { data: responseData, error } = await supabase.functions.invoke('challonge-proxy', {
+        body: { 
+            endpoint, 
+            method: 'PUT',
+            body: JSON.stringify(payload)
+        }
+    });
+
+    console.log('[Challonge] toggleGroupStage response:', responseData);
+
+    if (error) {
+        throw new Error(error.message || "Failed to toggle group stage on Challonge.");
+    }
+    if (responseData?.errors) {
+        throw new Error(`Challonge Error: ${JSON.stringify(responseData.errors)}`);
     }
     return responseData?.data;
 };

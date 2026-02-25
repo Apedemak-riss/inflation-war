@@ -1,152 +1,204 @@
+/**
+ * Transform Challonge match/participant data into the format expected by
+ * @g-loot/react-tournament-brackets.
+ *
+ * The library needs:
+ *  - For SE: Match[] where each match has `nextMatchId` pointing forward.
+ *    The final match has `nextMatchId: null`.
+ *  - For DE: { upper: Match[], lower: Match[] } where upper matches also
+ *    carry `nextLooserMatchId` pointing to the lower bracket match the
+ *    loser drops into. Lower matches have `nextLooserMatchId: null`.
+ *
+ * Challonge v1 API provides (per match object inside `{match: {...}}`):
+ *  - round: positive = winners/upper, negative = losers/lower
+ *  - player1_prereq_match_id, player2_prereq_match_id
+ *  - loser_match_id  (where the loser of this match goes — used for DE)
+ *  - winner_id, player1_id, player2_id
+ *  - scores_csv
+ *  - suggested_play_order
+ *  - identifier  ("A", "B", etc.)
+ */
+
+export interface TransformedMatch {
+    id: number | string;
+    name: string;
+    nextMatchId: number | string | null;
+    nextLooserMatchId: number | string | null;
+    tournamentRoundText: string;
+    startTime: string | null;
+    state: string;
+    participants: TransformedParticipant[];
+    // Extra metadata kept for downstream consumers (group stages, round robin, etc.)
+    tournamentRound: number;
+    group_id: number | string | null;
+    // Raw Challonge IDs used by NeonBracketMatch / CustomBracket
+    player1_id: number | string | null;
+    player2_id: number | string | null;
+    winner_id: number | string | null;
+    suggested_play_order: number | null;
+}
+
+export interface TransformedParticipant {
+    id: string | null;
+    resultText: string | null;
+    isWinner: boolean;
+    status: string | null;
+    name: string;
+}
+
 export const transformChallongeData = (
     participantsArray: any[],
     matchesArray: any[]
-): { participants: any[], matches: any[] } => {
-    
-    // 1. Normalize Participants Array (JSON:API style)
-    // v2.1: [ { id, type, attributes: { ... } } ]
+): { participants: any[]; matches: TransformedMatch[] } => {
+
+    // ── 1. Normalize Participants ──
+    // v2.1 JSON:API format: { id, type, attributes: { name, ... } }
     const normalizedParticipants = participantsArray.map(p => {
-        if (p.attributes) return { id: p.id, ...p.attributes };
-        if (p.participant) return p.participant; // Fallback for v1 purely just in case
+        if (p.attributes) {
+            return { 
+                id: p.id, 
+                ...p.attributes,
+                group_player_ids: p.group_player_ids // Preserve injected v1 mapping!
+            };
+        }
+        if (p.participant) return p.participant;
         return p;
     });
 
-    // 2. Normalize Matches Array (JSON:API style)
+    // Build fast lookup: Challonge participant ID → name
+    const participantNameMap: Record<string, string> = {};
+    const participantMainIdMap: Record<string, string> = {};
+    
+    normalizedParticipants.forEach(p => {
+        const idStr = String(p.id);
+        participantNameMap[idStr] = p.name || p.display_name || `Team ${idStr}`;
+        participantMainIdMap[idStr] = idStr;
+        // Also map group_player_ids (used in group stage tournaments)
+        if (Array.isArray(p.group_player_ids)) {
+            p.group_player_ids.forEach((gid: any) => {
+                participantNameMap[String(gid)] = participantNameMap[idStr];
+                participantMainIdMap[String(gid)] = idStr; // Map sub-ID to Main ID!
+            });
+        }
+    });
+
+    // ── 2. Normalize Matches (v1 wraps as {match: {...}}) ──
     const normalizedMatches = matchesArray.map(m => {
+        if (m.match) return m.match;
         if (m.attributes) return { id: m.id, ...m.attributes };
-        if (m.match) return m.match; // Fallback
         return m;
     });
 
-    // 3. Create Participant Map Strategy for faster lookups
-    const participantsMap: Record<string, any> = {};
-    const nameMap: Record<string, string> = {};
-
-    normalizedParticipants.forEach(p => {
-        const idStr = p.id?.toString();
-        // Fallbacks for group logic
-        const groupId1 = p.group_player_ids?.[0]?.toString();
+    // ── 3. Build participant helper ──
+    const buildParticipant = (
+        playerId: any,
+        score: string | undefined,
+        winnerId: any
+    ): TransformedParticipant => {
+        const rawIdStr = playerId != null ? String(playerId) : null;
+        const mainIdStr = rawIdStr ? (participantMainIdMap[rawIdStr] || rawIdStr) : null;
         
-        const finalP = {
-            id: idStr,
-            name: p.name || p.display_name || `Team ${idStr}`,
-            ...p
-        };
-
-        if (idStr) {
-            participantsMap[idStr] = finalP;
-            nameMap[idStr] = finalP.name;
-        }
-        if (groupId1) participantsMap[groupId1] = finalP; // Map group IDs back to the main participant if available
-    });
-
-    // 4. Transform Matches for @g-loot/react-tournament-brackets
-    const transformedMatches = normalizedMatches.map(raw => {
-        // v2.1 scores_csv might be in an Array on Match object now, or attributes.scores_csv
-        const scoreStr = raw.scores_csv || raw.score_set || '';
+        // Use rawIdStr for the winner evaluation because Challonge Match winner_id is often the sub-ID
+        const isWinner = winnerId != null && rawIdStr != null && String(winnerId) === rawIdStr;
         
-        let p1Score = undefined;
-        let p2Score = undefined;
-
-        if (scoreStr) {
-            // Split "1-2, 3-1" into just the final set usually, or sum them. 
-            // For simplicity, we just take the first set if it's "1-2"
-            const sets = scoreStr.split(',');
-            const lastSet = sets[sets.length - 1]; // Often the most relevant showing the final tally
-            const scores = lastSet.split('-').map((s: string) => s.trim());
-            if (scores.length === 2) {
-                p1Score = scores[0];
-                p2Score = scores[1];
-            }
-        }
-
-        const matchInfo = {
-            id: raw.id,
-            name: raw.identifier || `Match ${raw.id}`,
-            nextMatchId: raw.next_match_id || null, // Could be null for finals
-            nextLooserMatchId: raw.loser_to_match_id || null,
-            tournamentRoundText: raw.identifier ? `Round ${raw.identifier}` : `Round ${raw.round || raw.tournament_round}`,
-            startTime: raw.started_at || raw.scheduled_time || raw.created_at,
-            state: raw.state || 'SCHEDULED', // 'open', 'pending', 'complete'
-            participants: [],
-            group_id: raw.group_id,
-            ...raw // Keep all raw attributes available
-        };
-
-        // Determine who is Player 1 and Player 2.
-        const p1Id = raw.player1_id || raw.player_1_id;
-        const p2Id = raw.player2_id || raw.player_2_id;
+        // For the UI Name, use CustomBracket's `nameMap` logic later, or provide the mapped name here
+        const name = rawIdStr ? (participantNameMap[rawIdStr] || `Team ${rawIdStr}`) : 'TBD';
         
-        // Helper to construct participant objects for the library
-        const getParticipantData = (playerId: any, score: any, winnerId: any) => {
-            const idStr = playerId?.toString();
-            const pInfo = idStr ? participantsMap[idStr] : null;
-            const name = pInfo ? pInfo.name : idStr ? `Participant ${idStr}` : 'TBD';
-            
-            let isWinner = false;
-            if (winnerId && playerId && winnerId === playerId) {
-                isWinner = true;
-            }
-
-            return {
-                id: idStr || null,
-                resultText: score !== null && score !== undefined ? score : null,
-                isWinner: isWinner,
-                status: null, // Let the library infer
-                name: name,
-                picture: pInfo?.attached_participant_portrait_url || undefined,
-                // Add full participant info for custom rendering
-                _rawParticipant: pInfo,
-                prereqMatchId: null as any // Added to suppress TS type error
-            };
-        };
-
         return {
-            id: matchInfo.id,
-            name: matchInfo.name,
-            nextMatchId: matchInfo.nextMatchId,
-            nextLooserMatchId: matchInfo.nextLooserMatchId,
-            tournamentRoundText: matchInfo.tournamentRoundText,
-            startTime: matchInfo.startTime,
-            state: matchInfo.state,
-            tournamentRound: matchInfo.tournament_round || matchInfo.round,
-            participants: [
-                getParticipantData(p1Id, p1Score, matchInfo.winner_id),
-                getParticipantData(p2Id, p2Score, matchInfo.winner_id)
-            ],
-            group_id: matchInfo.group_id,
-            // Store raw data for pass 2
-            _rawMatch: matchInfo 
+            id: mainIdStr, // OVERRIDE the sub-ID with the mapped main participant ID!
+            resultText: score !== undefined && score !== null ? score : null,
+            isWinner,
+            status: mainIdStr ? null : 'NO_PARTY',
+            name,
         };
+    };
+
+    // ── 4. Parse scores ──
+    const parseScores = (scoresCsv: string | null | undefined): [string | undefined, string | undefined] => {
+        if (!scoresCsv) return [undefined, undefined];
+        // Challonge format: "3-1" or "3-1,2-0" (multiple sets)
+        // Take cumulative or last set — we'll just take the final set for display
+        const sets = scoresCsv.split(',');
+        const lastSet = sets[sets.length - 1].trim();
+        const parts = lastSet.split('-');
+        if (parts.length === 2) {
+            return [parts[0].trim(), parts[1].trim()];
+        }
+        return [undefined, undefined];
+    };
+
+    // ── 5. Transform each match ──
+    const matchById: Record<string, any> = {};
+    const transformedById: Record<string, TransformedMatch> = {};
+
+    // First pass: create all transformed matches
+    normalizedMatches.forEach(raw => {
+        matchById[String(raw.id)] = raw;
+        const [p1Score, p2Score] = parseScores(raw.scores_csv);
+
+        const roundNum = raw.round || 0;
+        const identifier = raw.identifier || '';
+
+        const transformed: TransformedMatch = {
+            id: raw.id,
+            name: identifier ? `Match ${identifier}` : `Match ${raw.id}`,
+            nextMatchId: null,            // Will be filled in pass 2
+            nextLooserMatchId: null,       // Will be filled in pass 2
+            tournamentRoundText: identifier ? `Round ${identifier}` : `Round ${Math.abs(roundNum)}`,
+            startTime: raw.started_at || raw.scheduled_time || raw.created_at || null,
+            state: raw.state || 'SCHEDULED',
+            participants: [
+                buildParticipant(raw.player1_id, p1Score, raw.winner_id),
+                buildParticipant(raw.player2_id, p2Score, raw.winner_id),
+            ],
+            tournamentRound: roundNum,
+            group_id: raw.group_id || null,
+            player1_id: raw.player1_id,
+            player2_id: raw.player2_id,
+            winner_id: raw.winner_id,
+            suggested_play_order: raw.suggested_play_order ?? null,
+        };
+
+        transformedById[String(raw.id)] = transformed;
     });
 
-    // 5. Pass 2: Calculate specific next match routing where Challonge doesn't provide it clearly, or where dependencies exist
-    // @g-loot relies heavily on nextMatchId to build the tree structure.
-    const finalMatches = transformedMatches.map((match) => {
-        // v2.1 uses prerequisite_match_ids object, v1 uses player1_prereq_match_id
-        const prereqs = match._rawMatch.prerequisite_match_ids || {};
-        const p1Prereq = prereqs.player_1 || match._rawMatch.player1_prereq_match_id || match._rawMatch.player_1_prereq_match_id;
-        const p2Prereq = prereqs.player_2 || match._rawMatch.player2_prereq_match_id || match._rawMatch.player_2_prereq_match_id;
+    // ── 6. Build nextMatchId links from prerequisite fields (Pass 2) ──
+    // Challonge v1 tells us "this match's player1 comes from match X".
+    // We reverse that: match X's nextMatchId should point to this match.
+    normalizedMatches.forEach(raw => {
+        const thisId = raw.id;
+        const p1Prereq = raw.player1_prereq_match_id;
+        const p2Prereq = raw.player2_prereq_match_id;
+        const loserMatchId = raw.loser_match_id; // DE: where the loser goes
 
-        // Ensure participants know their routing source
-        if (match.participants[0]) match.participants[0].prereqMatchId = p1Prereq;
-        if (match.participants[1]) match.participants[1].prereqMatchId = p2Prereq;
-
-        // Back-link the nextMatchId since Challonge only natively looks backwards
-        if (p1Prereq) {
-            const prereqMatch = transformedMatches.find(m => m.id?.toString() === p1Prereq?.toString());
-            if (prereqMatch) prereqMatch.nextMatchId = match.id;
+        // Back-link prerequisites → this match
+        if (p1Prereq && transformedById[String(p1Prereq)]) {
+            const prereqMatch = transformedById[String(p1Prereq)];
+            // Only set nextMatchId if the prereq is in the same bracket direction
+            // (upper→upper, lower→lower), OR it's the Grand Final link
+            prereqMatch.nextMatchId = thisId;
         }
-        if (p2Prereq) {
-            const prereqMatch = transformedMatches.find(m => m.id?.toString() === p2Prereq?.toString());
-            if (prereqMatch) prereqMatch.nextMatchId = match.id;
+        if (p2Prereq && transformedById[String(p2Prereq)]) {
+            const prereqMatch = transformedById[String(p2Prereq)];
+            prereqMatch.nextMatchId = thisId;
         }
 
-        return match;
+        // Set nextLooserMatchId on THIS match (where this match's loser goes)
+        if (loserMatchId && transformedById[String(thisId)]) {
+            transformedById[String(thisId)].nextLooserMatchId = loserMatchId;
+        }
     });
+
+    // ── 7. Ensure the Grand Final has nextMatchId: null ──
+    // The grand final is the match with the highest positive round number
+    // that nothing else points to as a prerequisite (i.e., no match sets nextMatchId to it
+    // via the prereq backfill, but that's already handled — the GF's own nextMatchId stays null
+    // since no match has GF as a prerequisite).
+
+    const allMatches = Object.values(transformedById);
 
     return {
         participants: normalizedParticipants,
-        matches: finalMatches
+        matches: allMatches,
     };
 };

@@ -3,8 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { CustomBracket } from './CustomBracket';
-import { ArrowLeft, Trophy, Crown, X, AlertTriangle, RotateCcw, Settings, Users, Terminal, MonitorPlay, ChevronRight, RefreshCw, Loader2, Trash2 } from 'lucide-react';
-import { fetchParticipants, finalizeTournament, startTournament, fetchOpenMatches, startGroupStage, finalizeGroupStage, fetchTournamentDetails } from '../services/challongeService';
+import { ArrowLeft, Trophy, Crown, X, AlertTriangle, RotateCcw, Settings, Users, Terminal, MonitorPlay, ChevronRight, RefreshCw, Loader2, Trash2, Shuffle } from 'lucide-react';
+import { fetchParticipants, finalizeTournament, startTournament, fetchOpenMatches, startGroupStage, finalizeGroupStage, fetchTournamentDetails, randomizeParticipants, toggleGroupStage } from '../services/challongeService';
 import toast from 'react-hot-toast';
 import { confirmToast } from '../utils/confirmToast';
 
@@ -84,6 +84,8 @@ export const TournamentView: React.FC = () => {
     const [registeredTeams, setRegisteredTeams] = useState<any[]>([]);
     const [isSyncing, setIsSyncing] = useState(false);
     const [challongeState, setChallongeState] = useState<string>('');
+    const [isSeeded, setIsSeeded] = useState(false);
+    const [isTogglingGroups, setIsTogglingGroups] = useState(false);
 
     useEffect(() => {
         if (!challongeUrl) return;
@@ -266,13 +268,14 @@ export const TournamentView: React.FC = () => {
             if (tournament.group_stages_enabled) {
                 await toast.promise(
                     (async () => {
+                        // Start the group stage
                         await startGroupStage(tournament.challonge_url);
                         const { error } = await supabase.from('tournaments').update({ status: 'active' }).eq('id', tournament.id);
                         if (error) throw error;
                         setChallongeState('group_stages_underway');
                         await fetchTournamentData();
                     })(),
-                    { loading: 'Starting Group Stage...', success: 'Group Stage Started!', error: (err) => err.message || 'Failed to start group stage' }
+                    { loading: 'Starting group stage...', success: 'Group Stage Started!', error: (err) => err.message || 'Failed to start group stage' }
                 );
             } else {
                 await toast.promise(
@@ -447,7 +450,10 @@ export const TournamentView: React.FC = () => {
                 <div className="w-full min-h-[85vh] rounded-2xl overflow-visible border border-white/5 shadow-2xl relative bg-[#0a101f]">
                     <div className="absolute inset-0 bg-gradient-to-b from-blue-500/5 to-transparent pointer-events-none opacity-50"></div>
                     <div className="relative z-10 w-full h-full">
-                        <CustomBracket tournamentUrl={tournament.challonge_url} isModerator={profile?.role === 'moderator'} />
+                        <CustomBracket 
+                            tournamentUrl={tournament.challonge_url} 
+                            isModerator={profile?.role === 'moderator'}
+                        />
                     </div>
                 </div>
 
@@ -508,16 +514,87 @@ export const TournamentView: React.FC = () => {
                                 </h3>
                                 
                                 <div className="flex flex-col gap-3">
-                                    
+                                    {/* GROUP STAGE CONFIG — only when upcoming and has group stages */}
+                                    {tournament.status === 'upcoming' && (
+                                        <div className="p-4 border border-fuchsia-500/20 bg-fuchsia-950/20 rounded-xl">
+                                            <label className="flex items-center gap-3 cursor-pointer group">
+                                                <div className="relative flex items-center">
+                                                    <input 
+                                                        type="checkbox" 
+                                                        checked={tournament.group_stages_enabled}
+                                                        disabled={isTogglingGroups}
+                                                        onChange={async (e) => {
+                                                            const newValue = e.target.checked;
+                                                            setIsTogglingGroups(true);
+                                                            try {
+                                                                await toast.promise(
+                                                                    (async () => {
+                                                                        await toggleGroupStage(tournament.challonge_url, newValue);
+                                                                        // Update local DB
+                                                                        await supabase.from('tournaments').update({ group_stages_enabled: newValue }).eq('id', tournament.id);
+                                                                        await fetchTournamentData();
+                                                                    })(),
+                                                                    { loading: newValue ? 'Enabling group stages...' : 'Disabling group stages...', success: newValue ? 'Group stages enabled!' : 'Group stages disabled!', error: (err) => err.message || 'Failed' }
+                                                                );
+                                                            } catch { /* handled by toast */ }
+                                                            finally { setIsTogglingGroups(false); }
+                                                        }}
+                                                        className="sr-only peer"
+                                                    />
+                                                    <div className={`w-5 h-5 border-2 rounded transition-colors ${tournament.group_stages_enabled ? 'bg-fuchsia-500 border-fuchsia-500' : 'border-slate-600 bg-black'} ${isTogglingGroups ? 'opacity-50' : ''}`}></div>
+                                                </div>
+                                                <div className="flex flex-col">
+                                                    <span className="text-white font-bold text-xs tracking-widest uppercase">GROUP STAGES</span>
+                                                    <span className="text-slate-500 text-[10px]">Two-stage: Groups → Bracket</span>
+                                                </div>
+                                                {isTogglingGroups && <Loader2 size={14} className="animate-spin text-fuchsia-400 ml-auto" />}
+                                            </label>
+                                        </div>
+                                    )}
+
+                                    {/* SEED PARTICIPANTS — only when upcoming and has group stages */}
+                                    {tournament.status === 'upcoming' && tournament.group_stages_enabled && (
+                                        <button
+                                            onClick={async () => {
+                                                setIsProcessing(true);
+                                                try {
+                                                    await toast.promise(
+                                                        (async () => {
+                                                            await randomizeParticipants(tournament.challonge_url);
+                                                            setIsSeeded(true);
+                                                        })(),
+                                                        { loading: 'Seeding participants...', success: 'Participants seeded into groups!', error: (err) => err.message || 'Failed to seed' }
+                                                    );
+                                                } catch { /* handled by toast */ }
+                                                finally { setIsProcessing(false); }
+                                            }}
+                                            disabled={isProcessing || isSeeded}
+                                            className={`w-full flex items-center justify-between p-4 rounded-xl transition-all font-black tracking-widest text-sm group disabled:opacity-50 ${
+                                                isSeeded
+                                                    ? 'bg-emerald-900/30 border border-emerald-500/40 text-emerald-300'
+                                                    : 'bg-violet-900/20 border border-violet-500/30 hover:bg-violet-800/40 hover:border-violet-400 text-violet-100 shadow-[0_0_15px_rgba(139,92,246,0.1)]'
+                                            }`}
+                                        >
+                                            <span className="flex items-center gap-3">
+                                                <Shuffle size={18} className={isSeeded ? 'text-emerald-500' : 'group-hover:scale-110 transition-transform text-violet-500'} />
+                                                {isSeeded ? '✓ PARTICIPANTS SEEDED' : 'SEED PARTICIPANTS'}
+                                            </span>
+                                            {!isSeeded && <ChevronRight size={16} className="opacity-50" />}
+                                        </button>
+                                    )}
+
                                     {/* START */}
                                     {tournament.status === 'upcoming' && (
                                         <button 
                                             onClick={handleStartTournament}
-                                            disabled={isProcessing}
+                                            disabled={isProcessing || (tournament.group_stages_enabled && !isSeeded)}
                                             className="w-full flex items-center justify-between p-4 bg-emerald-900/20 border border-emerald-500/30 hover:bg-emerald-800/40 hover:border-emerald-400 text-emerald-100 rounded-xl transition-all font-black tracking-widest text-sm shadow-[0_0_15px_rgba(52,211,153,0.1)] group disabled:opacity-50"
                                         >
                                             <span className="flex items-center gap-3"><MonitorPlay size={18} className="group-hover:scale-110 transition-transform text-emerald-500" /> START TOURNAMENT</span>
-                                            <ChevronRight size={16} className="opacity-50" />
+                                            {tournament.group_stages_enabled && !isSeeded && (
+                                                <span className="text-[9px] text-amber-400 font-normal tracking-normal normal-case">Seed first</span>
+                                            )}
+                                            {!(tournament.group_stages_enabled && !isSeeded) && <ChevronRight size={16} className="opacity-50" />}
                                         </button>
                                     )}
                                     

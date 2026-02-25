@@ -1038,82 +1038,45 @@ function AppContent() {
                   return;
               }
               
-              // FIX: Fetch match data inline at submission time — the openMatches/participantToRosterMap state was never populated
-              const { fetchOpenMatches } = await import('./services/challongeService');
-              const allMatches = await fetchOpenMatches(tournamentUrl);
-              const mId = foundLobby.challonge_match_id.toString();
-              const targetMatch = allMatches.find((m: any) => (m.match?.id || m.id)?.toString() === mId);
-              
+              // ==========================================
+              // SCORE EXTRACTION & MAIN ID RESOLUTION
+              // ==========================================
+              // Challonge v2 updates explicitly require the Main Participant IDs.
+              // Instead of trusting the volatile Sub-IDs found in `targetMatch` for Group Stages,
+              // we extract the known Lobby Teams and rigidly map them backwards to their Main IDs!
               let winnerScore = '0';
               let loserScore = '0';
               let loserChallongeId: string | null = null;
-              
-              if (targetMatch) {
-                  const matchData = targetMatch.match || targetMatch;
-                  const p1ChallongeId = matchData.player1_id?.toString();
-                  const p2ChallongeId = matchData.player2_id?.toString();
-                  
-                  // Resolve Challonge Participant IDs -> Roster IDs via tournament_registrations
-                  const { data: regs } = await supabase.from('tournament_registrations')
-                      .select('challonge_participant_id, roster_id')
-                      .eq('tournament_id', tData.id)
-                      .in('challonge_participant_id', [p1ChallongeId, p2ChallongeId]);
-                  
-                  if (regs && regs.length >= 2) {
-                      const p1Reg = regs.find(r => r.challonge_participant_id === p1ChallongeId);
-                      const p2Reg = regs.find(r => r.challonge_participant_id === p2ChallongeId);
-                      
-                      const teamForP1 = lobbyTeams.find(t => t.roster_id === p1Reg?.roster_id);
-                      const teamForP2 = lobbyTeams.find(t => t.roster_id === p2Reg?.roster_id);
-                      
-                      const p1Stars = parseInt(endMatchScores[teamForP1?.id || '']?.stars) || 0;
-                      const p2Stars = parseInt(endMatchScores[teamForP2?.id || '']?.stars) || 0;
-                      
-                      // Determine who is winner and loser for the API call
-                      if (wChallongeId === p1ChallongeId) {
-                          winnerScore = String(p1Stars);
-                          loserScore = String(p2Stars);
-                          loserChallongeId = p2ChallongeId;
-                      } else {
-                          winnerScore = String(p2Stars);
-                          loserScore = String(p1Stars);
-                          loserChallongeId = p1ChallongeId;
-                      }
-                  } else {
-                      // Partial registration fallback
-                      const winnerTeamStars = parseInt(endMatchScores[winnerTeam.id]?.stars) || 0;
-                      const loserTeamObj = lobbyTeams.find(t => t.id !== winnerTeam.id);
-                      const loserTeamStars = parseInt(endMatchScores[loserTeamObj?.id || '']?.stars) || 0;
-                      winnerScore = String(winnerTeamStars);
-                      loserScore = String(loserTeamStars);
-                      // Try to find the loser's challonge ID
-                      loserChallongeId = (wChallongeId === p1ChallongeId) ? p2ChallongeId : p1ChallongeId;
-                  }
-              } else {
-                  // No match found in Challonge — use lobby order as last resort
-                  const winnerTeamStars = parseInt(endMatchScores[winnerTeam.id]?.stars) || 0;
-                  const loserTeamObj = lobbyTeams.find(t => t.id !== winnerTeam.id);
-                  const loserTeamStars = parseInt(endMatchScores[loserTeamObj?.id || '']?.stars) || 0;
-                  winnerScore = String(winnerTeamStars);
+
+              // 1. Extract Scores accurately from the frontend matrix
+              const winnerTeamStars = parseInt(endMatchScores[winnerTeam.id]?.stars) || 0;
+              winnerScore = String(winnerTeamStars);
+
+              const loserTeamObj = lobbyTeams.find(t => t.id !== winnerTeam.id);
+              if (loserTeamObj) {
+                  const loserTeamStars = parseInt(endMatchScores[loserTeamObj.id]?.stars) || 0;
                   loserScore = String(loserTeamStars);
+
+                  // 2. Fetch the Loser's exact Main Participant ID dynamically
+                  const { data: loserReg } = await supabase.from('tournament_registrations')
+                      .select('challonge_participant_id')
+                      .eq('tournament_id', tData.id)
+                      .eq('roster_id', loserTeamObj.roster_id)
+                      .single();
+                  
+                  if (loserReg) {
+                      loserChallongeId = loserReg.challonge_participant_id;
+                  }
               }
-              
-              if (!loserChallongeId) {
-                  // If we can't determine loser ID, find the other participant from registrations
-                  const { data: allRegs } = await supabase.from('tournament_registrations')
-                      .select('challonge_participant_id, roster_id')
-                      .eq('tournament_id', tData.id);
-                  const loserTeamObj = lobbyTeams.find(t => t.id !== winnerTeam.id);
-                  const loserReg = allRegs?.find(r => r.roster_id === loserTeamObj?.roster_id);
-                  loserChallongeId = loserReg?.challonge_participant_id || null;
-              }
-              
+
               if (!loserChallongeId) {
                   toast.error('Cannot determine losing team Challonge ID. Score will not be submitted.');
                   setModLoading(false);
                   return;
               }
-              
+
+              console.log('[DEBUG_CHALLONGE_IDS] Pre-API Push -> Winner Main:', wChallongeId, '| Loser Main:', loserChallongeId);
+
               const { reportMatchScore } = await import('./services/challongeService');
               await reportMatchScore(tournamentUrl, foundLobby.challonge_match_id, wChallongeId, winnerScore, loserChallongeId, loserScore);
           }

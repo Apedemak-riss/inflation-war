@@ -1,16 +1,11 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { RefreshCw, LayoutList, Trophy } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { RefreshCw, LayoutList, Trophy, Swords } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-// @ts-ignore
-import { SingleEliminationBracket, DoubleEliminationBracket, Match, SVGViewer, createTheme } from '@g-loot/react-tournament-brackets';
-import { StyleSheetManager } from 'styled-components';
-import { NeonBracketMatch } from './NeonBracketMatch';
 import { fetchParticipants, fetchOpenMatches, fetchTournamentDetails } from '../services/challongeService'; 
 import toast from 'react-hot-toast';
 import { transformChallongeData } from '../utils/bracketTransforms';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { BracketContext } from '../contexts/BracketContext';
 
 interface CustomBracketProps {
     tournamentUrl: string;
@@ -21,7 +16,7 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
     const { user } = useAuth();
     const navigate = useNavigate();
     const [matches, setMatches] = useState<any[]>([]);
-    const [participants, setParticipants] = useState<any[]>([]); // Added to cache for standings
+    const [participants, setParticipants] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [userChallongeId, setUserChallongeId] = useState<string | null>(null);
@@ -29,21 +24,15 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
     const [activeMatches, setActiveMatches] = useState<Record<string, string>>({});
     const [tournamentType, setTournamentType] = useState<string>('single elimination');
     const [groupStagesEnabled, setGroupStagesEnabled] = useState(false);
-    const [groupStageState, setGroupStageState] = useState<string>(''); // 'group_stages_underway', 'group_stages_finalized', etc.
+    const [groupStageState, setGroupStageState] = useState<string>('');
+    const [advanceCount, setAdvanceCount] = useState<number>(2);
     
-    // Phase 33: Registration Map
     const [rosterMap, setRosterMap] = useState<Record<string, string>>({});
-    // Phase 49: Participant Names Map
     const [nameMap, setNameMap] = useState<Record<string, string>>({});
-
-    // Container ref for positioning
-    const containerRef = useRef<HTMLDivElement>(null);
-
 
     useEffect(() => {
         const fetchUserChallongeId = async () => {
             if (user?.id) {
-                // 1. Find if the current user is a captain of a roster
                 const { data: captainData, error: captainError } = await supabase
                     .from('rosters')
                     .select('id')
@@ -51,11 +40,9 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
                     .single();
                 
                 if (!captainError && captainData?.id) {
-                    // Note: This variable is named userChallongeId for context compatibility, but it now stores the native Roster ID
                     setUserChallongeId(captainData.id);
                     setIsCaptain(true);
                 } else {
-                    // 2. If not a captain, check if they are a member
                     const { data: memberData, error: memberError } = await supabase
                         .from('roster_members')
                         .select('roster_id')
@@ -64,7 +51,7 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
                         
                     if (!memberError && memberData?.roster_id) {
                         setUserChallongeId(memberData.roster_id);
-                        setIsCaptain(false); // Can't start lobbies but can see matches
+                        setIsCaptain(false);
                     }
                 }
             }
@@ -92,13 +79,11 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
 
         fetchActiveMatches();
 
-        // Set up real-time listener for new bracket lobbies synchronously
         const channel = supabase.channel('bracket_lobbies_events')
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'lobbies' },
                 (payload) => {
-                    console.log('Bracket realtime event:', payload);
                     const newRecord = payload.new as any;
                     if (newRecord && newRecord.challonge_match_id && newRecord.code) {
                         setActiveMatches(prev => ({
@@ -108,9 +93,7 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
                     }
                 }
             )
-            .subscribe((status) => {
-                console.log('Bracket realtime status:', status);
-            });
+            .subscribe();
 
         return () => {
             supabase.removeChannel(channel);
@@ -123,9 +106,7 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
         if (!tournamentUrl) return;
         setLoading(true);
         try {
-            // We MUST use the v1 API for matches because v2.1 explicitly destroys all `prerequisite_match_ids` needed for tree maps.
             const matchesPromise = fetchOpenMatches(tournamentUrl);
-
             const [matchesRes, participantsData] = await Promise.all([
                 matchesPromise,
                 fetchParticipants(tournamentUrl)
@@ -144,12 +125,17 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
                 }
                 setGroupStagesEnabled(!!tData.group_stages_enabled);
 
-                // Fetch Challonge tournament state for group stage status
                 if (tData.group_stages_enabled) {
                     try {
                         const challongeDetails = await fetchTournamentDetails(tournamentUrl);
                         const state = challongeDetails?.attributes?.state || '';
                         setGroupStageState(state);
+                        
+                        // Extract advance count if present
+                        const tOpts = challongeDetails?.attributes?.group_stage_options;
+                        if (tOpts && tOpts.participant_count_to_advance_per_group) {
+                            setAdvanceCount(tOpts.participant_count_to_advance_per_group);
+                        }
                     } catch (e) {
                         console.warn('Could not fetch tournament state from Challonge:', e);
                     }
@@ -176,7 +162,6 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
                 }
             }
 
-            // Using the updated v2.1 transformations
             const transformed = transformChallongeData(participantsData, matchesRes);
             setMatches(transformed.matches);
             setError(null);
@@ -206,126 +191,261 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
         return <div className="text-red-500 p-8 border border-red-500/30 rounded-2xl bg-black/40">ERROR LOADING BRACKET: {error}</div>;
     }
 
-    if (matches.length === 0) {
-        return <div className="text-slate-500 p-12 text-center text-xs tracking-widest uppercase">No Bracket Data Found</div>;
-    }
-
-    // Modern Dark Theme matching Inflation War
-    const theme = createTheme({
-        fontFamily: '"Outfit", sans-serif',
-        textColor: {
-            main: '#ffffff',
-            highlighted: '#ffffff',
-            dark: '#94a3b8'
-        },
-        matchBackground: {
-            wonColor: '#050b14',      // Dark background
-            lostColor: '#050b14'
-        },
-        score: {
-            background: {
-                wonColor: 'rgba(34, 197, 94, 0.1)', // Green tint
-                lostColor: 'rgba(239, 68, 68, 0.1)' // Red tint
-            },
-            text: {
-                highlightedWonColor: '#22c55e',
-                highlightedLostColor: '#ef4444'
-            }
-        },
-        border: {
-            color: 'rgba(255,255,255,0.05)',
-            highlightedColor: 'rgba(255,255,255,0.2)'
-        },
-        roundHeader: {
-            backgroundColor: '#0a101f',
-            fontColor: '#ffffff'
-        },
-        connectorColor: 'rgba(255,255,255,0.1)',
-        connectorColorHighlight: '#ef4444',
-        svgBackground: '#050b14'
-    });
-
-    // Determine Bracket Layout Types
-    const isDoubleElimination = tournamentType === 'double elimination';
     const isRoundRobin = tournamentType === 'round robin';
 
-    const commonBracketOptions = {
-        style: {
-            roundHeader: { 
-                backgroundColor: '#0a101f', 
-                fontColor: '#FBBF24', 
-                fontFamily: '"Outfit", sans-serif',
-                marginBottom: 20 
-            },
-            connectorColor: 'rgba(255,255,255,0.1)',
-            connectorColorHighlight: '#ef4444',
-            width: 440,
-            matchWidth: 440,
-            boxHeight: 260,
-            canvasPadding: 80
+    // ── Helper: determine which matches can have "CREATE LOBBY" button ──
+    // Rules:
+    // 1. Match must be open (SCHEDULED/open/pending)
+    // 2. Both participants must be known (no TBD)
+    // 3. Only the FIRST chronological open match per team gets the button
+    //    (sorted by Challonge suggested_play_order / round / id)
+    // 4. User must be a captain and in the match
+    const getCreatableMatchIds = (matchList: any[]): Set<string> => {
+        // Sort by suggested_play_order (Challonge's intended order), then round, then id
+        const sorted = [...matchList].sort((a, b) => {
+            const orderA = a.suggested_play_order ?? a.tournamentRound ?? 0;
+            const orderB = b.suggested_play_order ?? b.tournamentRound ?? 0;
+            if (orderA !== orderB) return orderA - orderB;
+            return (a.id ?? 0) - (b.id ?? 0);
+        });
+
+        const teamFirstMatch = new Set<string>(); // rosters that already have a creatable match
+        const creatableIds = new Set<string>();
+
+        for (const m of sorted) {
+            const isOpen = m.state === 'SCHEDULED' || m.state === 'open' || m.state === 'pending';
+            if (!isOpen) continue;
+
+            const hasLobby = !!activeMatches[m.id];
+            if (hasLobby) continue; // Already has a lobby
+
+            const p1Id = m.participants[0]?.id;
+            const p2Id = m.participants[1]?.id;
+
+            // Both participants must be known (no TBD)
+            if (!p1Id || !p2Id) continue;
+
+            // Moderators can create *any* open match unconditionally
+            if (isModerator) {
+                creatableIds.add(String(m.id));
+                continue;
+            }
+
+            const topRosterId = rosterMap[p1Id];
+            const bottomRosterId = rosterMap[p2Id];
+            if (!topRosterId || !bottomRosterId) continue;
+
+            const isPlayerInMatch = userChallongeId && (topRosterId === userChallongeId || bottomRosterId === userChallongeId);
+            if (!isPlayerInMatch || !isCaptain) continue;
+
+            // Only allow if this team hasn't been assigned a creatable match yet
+            const myRoster = topRosterId === userChallongeId ? topRosterId : bottomRosterId;
+            if (teamFirstMatch.has(myRoster)) continue;
+
+            teamFirstMatch.add(myRoster);
+            creatableIds.add(String(m.id));
         }
+        return creatableIds;
     };
 
+    // ── Match Card (Reused for match lists and RR) ──
+    const renderMatchCard = (match: any, canCreateLobby: boolean = false) => {
+        const topRosterId = rosterMap[match.participants[0]?.id];
+        const bottomRosterId = rosterMap[match.participants[1]?.id];
+        const isPlayerInMatch = Boolean(userChallongeId && (topRosterId === userChallongeId || bottomRosterId === userChallongeId));
+        const liveLobbyCode = activeMatches[match.id];
+        const isComplete = match.state === 'complete';
+
+        return (
+            <div key={match.id} className={`relative transform hover:scale-[1.02] transition-all duration-300 ${isComplete ? 'opacity-50 saturate-50' : ''}`}>
+                <div className={`rounded-xl p-4 shadow-lg flex flex-col justify-around gap-2 h-32 relative ${
+                    liveLobbyCode
+                        ? 'bg-gradient-to-br from-red-950/40 to-black/60 border border-red-500/30 shadow-[0_0_20px_rgba(239,68,68,0.1)]'
+                        : canCreateLobby
+                            ? 'bg-gradient-to-br from-sky-950/30 to-black/50 border border-sky-500/20 shadow-[0_0_15px_rgba(56,189,248,0.05)]'
+                            : 'bg-black/40 border border-[#3b4b68]/40'
+                }`}>
+                    {/* Top Participant */}
+                    <div className={`flex justify-between items-center px-3 py-1.5 rounded-md ${match.participants[0]?.isWinner ? 'bg-green-500/10 border border-green-500/20' : 'bg-white/5 border border-transparent'}`}>
+                        <span className={`font-semibold font-outfit truncate pr-2 ${match.participants[0]?.isWinner ? 'text-green-400' : 'text-slate-300'}`}>
+                            {match.participants[0]?.name || 'TBD'}
+                        </span>
+                        <span className={`font-mono font-bold ${match.participants[0]?.isWinner ? 'text-green-400' : 'text-slate-500'}`}>
+                            {match.participants[0]?.resultText || '-'}
+                        </span>
+                    </div>
+                    {/* Bottom Participant */}
+                    <div className={`flex justify-between items-center px-3 py-1.5 rounded-md ${match.participants[1]?.isWinner ? 'bg-green-500/10 border border-green-500/20' : 'bg-white/5 border border-transparent'}`}>
+                        <span className={`font-semibold font-outfit truncate pr-2 ${match.participants[1]?.isWinner ? 'text-green-400' : 'text-slate-300'}`}>
+                            {match.participants[1]?.name || 'TBD'}
+                        </span>
+                        <span className={`font-mono font-bold ${match.participants[1]?.isWinner ? 'text-green-400' : 'text-slate-500'}`}>
+                            {match.participants[1]?.resultText || '-'}
+                        </span>
+                    </div>
+                    {/* Match Round Label */}
+                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#0a101f] border border-[#3b4b68] text-yellow-500 text-[9px] uppercase tracking-widest px-2 py-0.5 rounded-full">
+                        {match.tournamentRoundText || 'Match'}
+                    </div>
+
+                    {/* ACTION BUTTONS — only if canCreateLobby is true */}
+                    {!liveLobbyCode && canCreateLobby && (
+                        <button
+                            onClick={async (e) => {
+                                e.stopPropagation();
+                                try {
+                                    if (!topRosterId || !bottomRosterId) {
+                                        toast.error('Competitors have not synced via Tournament Registrations Matrix.');
+                                        return;
+                                    }
+                                    const { data: lobbyCode, error } = await supabase.rpc('create_lobby', {
+                                        p_lobby_name: `TNK-${String(match.id).slice(-4)}`,
+                                        p_team_a_roster_id: topRosterId,
+                                        p_team_b_roster_id: bottomRosterId,
+                                        p_challonge_match_id: String(match.id)
+                                    });
+                                    if (error) throw error;
+                                    if (lobbyCode) {
+                                        const codeToJoin = typeof lobbyCode === 'object' ? (lobbyCode.code || lobbyCode.id) : lobbyCode;
+                                        navigate(`/join/${codeToJoin}`);
+                                    }
+                                } catch (err: any) {
+                                    console.error('Error creating lobby:', err);
+                                    toast.error('Failed to create lobby: ' + err.message);
+                                }
+                            }}
+                            className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-slate-900 border border-sky-500/50 text-sky-400 hover:bg-sky-500/20 hover:text-white hover:border-sky-400 text-[10px] uppercase font-bold px-4 py-1 rounded-full shadow-[0_0_10px_rgba(56,189,248,0.2)] transition-all z-10"
+                        >
+                            CREATE LOBBY
+                        </button>
+                    )}
+                    {liveLobbyCode && (
+                        <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 flex items-center justify-center gap-2 z-10 w-max">
+                            {isPlayerInMatch && (
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        navigate(`/join/${liveLobbyCode}`);
+                                    }}
+                                    className="bg-red-500/10 border border-red-500/50 text-red-500 hover:bg-red-500/20 hover:text-white hover:border-red-400 text-[10px] uppercase font-bold px-4 py-1 rounded-full shadow-[0_0_10px_rgba(239,68,68,0.2)] transition-all"
+                                >
+                                    JOIN LOBBY
+                                </button>
+                            )}
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigate(`/stream/${liveLobbyCode}`);
+                                }}
+                                className="bg-purple-500/10 border border-purple-500/50 text-purple-400 hover:bg-purple-500/20 hover:text-white hover:border-purple-400 text-[10px] uppercase font-bold px-4 py-1 rounded-full shadow-[0_0_10px_rgba(168,85,247,0.2)] transition-all"
+                            >
+                                WATCH
+                            </button>
+                        </div>
+                    )}
+                </div>
+                {/* LIVE INDICATOR */}
+                {liveLobbyCode && (
+                    <div className="absolute -top-3 -right-3">
+                        <div className="relative">
+                            <div className="absolute inset-0 bg-red-500 blur animate-pulse rounded-full opacity-50"></div>
+                            <div className="relative bg-black border border-red-500/50 text-red-500 text-[10px] font-bold tracking-widest uppercase px-3 py-1.5 rounded-full shadow-lg flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping"></span>
+                                Live
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    // ── Render Content ──
     const renderBracketOrStandings = () => {
         // ============================================
         // GROUP STAGE VIEW — Show group standings tables
         // ============================================
         if (groupStagesEnabled && groupStageState === 'group_stages_underway') {
-            // Parse groups from match data — Challonge v1 includes group_id on matches
-            const groupMap: Record<string, Set<string>> = {};
-            const rawMatches = matches.length > 0 ? matches : [];
-            
-            // Build participant groups from match pairings
-            // For v1 API matches, the group_id field indicates which group a match belongs to
-            // For participants, group_id is on the participant object
-            participants.forEach((p: any) => {
-                const pid = (p.id || p.attributes?.id)?.toString();
-                const groupId = p.attributes?.group_id || p.group_id || 'A';
-                const gKey = `Group ${String.fromCharCode(65 + (parseInt(groupId) - 1) || 0)}`;
-                if (!groupMap[gKey]) groupMap[gKey] = new Set();
-                if (pid) groupMap[gKey].add(pid);
+            console.log('[DEBUG-GRPS] Render Standings - Total Participants:', participants.length);
+
+            // ==========================================
+            // GROUP STAGE ASSIGNMENT (Direct v1 Match Mapping)
+            // Participants hold a `group_player_ids` array. Match objects hold `group_id` and `player1_id` (which corresponds to `group_player_ids`).
+            // We scan the matches to definitively map every participant to their true Challonge group ID.
+            // ==========================================
+            const participantToRawGroupId: Record<string, string> = {};
+            const groupIdToLetter: Record<string, string> = {};
+
+            matches.forEach(m => {
+                const matchData = m.match || m;
+                const matchGroupId = matchData.group_id?.toString();
+                const p1_sub_id = matchData.player1_id;
+                const p2_sub_id = matchData.player2_id;
+
+                if (matchGroupId) {
+                    const mainP1 = participants.find((p: any) => p.group_player_ids?.includes(p1_sub_id));
+                    const mainP2 = participants.find((p: any) => p.group_player_ids?.includes(p2_sub_id));
+
+                    if (mainP1) participantToRawGroupId[mainP1.id || mainP1.attributes?.id] = matchGroupId;
+                    if (mainP2) participantToRawGroupId[mainP2.id || mainP2.attributes?.id] = matchGroupId;
+                }
             });
 
-            // If no groups detected, show all participants in one group
-            if (Object.keys(groupMap).length === 0) {
-                groupMap['Group A'] = new Set(participants.map((p: any) => (p.id || p.attributes?.id)?.toString()).filter(Boolean));
-            }
+            // Map the large random integer group_ids sequentially to Group A, B, C...
+            const uniqueRawGroups = Array.from(new Set(Object.values(participantToRawGroupId))).sort((a, b) => Number(a) - Number(b));
+            uniqueRawGroups.forEach((rawGroupId, index) => {
+                groupIdToLetter[rawGroupId] = `Group ${String.fromCharCode(65 + index)}`;
+            });
 
-            // Calculate stats per participant from matches
+            const getParticipantGroupName = (pid: string) => {
+                const rawGroupId = participantToRawGroupId[pid];
+                return rawGroupId ? groupIdToLetter[rawGroupId] : 'Group A';
+            };
+
             const allStats: Record<string, { name: string; wins: number; losses: number; points: number; group: string }> = {};
             
             participants.forEach((p: any) => {
                 const pid = (p.id || p.attributes?.id)?.toString();
                 const pName = p.attributes?.name || p.name || nameMap[pid] || `Team ${pid}`;
-                const groupId = p.attributes?.group_id || p.group_id || '1';
-                const gKey = `Group ${String.fromCharCode(65 + (parseInt(groupId) - 1) || 0)}`;
+                const gKey = pid ? getParticipantGroupName(pid) : 'Group A';
+                
                 if (pid) {
                     allStats[pid] = { name: pName, wins: 0, losses: 0, points: 0, group: gKey };
                 }
             });
 
-            // Count wins/losses from completed matches
-            rawMatches.forEach((m: any) => {
+            matches.forEach((m: any) => {
                 const matchData = m.match || m;
                 if (matchData.state !== 'complete') return;
-                const winnerId = matchData.winner_id?.toString();
-                const p1 = matchData.player1_id?.toString();
-                const p2 = matchData.player2_id?.toString();
-                if (winnerId && p1 && p2) {
-                    const loserId = winnerId === p1 ? p2 : p1;
-                    if (allStats[winnerId]) { allStats[winnerId].wins++; allStats[winnerId].points += 3; }
-                    if (allStats[loserId]) { allStats[loserId].losses++; }
+
+                const winnerSubId = matchData.winner_id;
+                const p1SubId = matchData.player1_id;
+                const p2SubId = matchData.player2_id;
+
+                if (winnerSubId && p1SubId && p2SubId) {
+                    const mainWinner = participants.find((p: any) => p.group_player_ids?.includes(winnerSubId));
+                    const loserSubId = winnerSubId === p1SubId ? p2SubId : p1SubId;
+                    const mainLoser = participants.find((p: any) => p.group_player_ids?.includes(loserSubId));
+
+                    const winnerId = mainWinner?.id || mainWinner?.attributes?.id;
+                    const loserId = mainLoser?.id || mainLoser?.attributes?.id;
+
+                    if (winnerId && allStats[winnerId]) {
+                        allStats[winnerId].wins++;
+                        allStats[winnerId].points += 3;
+                    }
+                    if (loserId && allStats[loserId]) {
+                        allStats[loserId].losses++;
+                    }
                 }
             });
 
-            // Organize into groups
             const groups: Record<string, typeof allStats[string][]> = {};
             Object.values(allStats).forEach(stat => {
                 if (!groups[stat.group]) groups[stat.group] = [];
                 groups[stat.group].push(stat);
             });
 
-            // Sort each group by points desc, then wins desc
             Object.keys(groups).forEach(g => {
                 groups[g].sort((a, b) => b.points - a.points || b.wins - a.wins);
             });
@@ -358,7 +478,7 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
                                     </thead>
                                     <tbody>
                                         {groups[groupName].map((stat, idx) => (
-                                            <tr key={stat.name} className={`border-t border-white/5 transition-colors hover:bg-white/5 ${idx < 2 ? 'bg-emerald-950/10' : ''}`}>
+                                            <tr key={stat.name} className={`border-t border-white/5 transition-colors hover:bg-white/5 ${idx < advanceCount ? 'bg-emerald-950/10' : ''}`}>
                                                 <td className="px-5 py-3 text-slate-600 font-mono text-sm">{idx + 1}</td>
                                                 <td className="px-5 py-3">
                                                     <span className="text-white font-bold text-sm tracking-wide">{stat.name}</span>
@@ -373,16 +493,73 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
                             </div>
                         ))}
                     </div>
+
+                    {/* Match Schedule — Progressive Rounds */}
+                    {(() => {
+                        const creatableIds = getCreatableMatchIds(matches);
+
+                        // Group matches by round (for Group Stages, `identifier` often holds the round text or `tournamentRound`)
+                        const roundMap: Record<number, any[]> = {};
+                        matches.forEach((m: any) => {
+                            const matchData = m.match || m;
+                            const roundNum = Math.abs(matchData.tournamentRound || matchData.suggested_play_order || 1) || 1;
+                            if (!roundMap[roundNum]) roundMap[roundNum] = [];
+                            roundMap[roundNum].push(m);
+                        });
+                        const sortedRounds = Object.keys(roundMap).map(Number).sort((a, b) => a - b);
+
+                        // Progressive unlock: show a round if:
+                        // - It's round 1 (always show), OR
+                        // - The previous round has at least one match that's started/complete/has a lobby
+                        const visibleRounds: number[] = [];
+                        for (let i = 0; i < sortedRounds.length; i++) {
+                            const roundNum = sortedRounds[i];
+                            if (i === 0) {
+                                visibleRounds.push(roundNum);
+                                continue;
+                            }
+                            const prevRound = sortedRounds[i - 1];
+                            const prevMatches = roundMap[prevRound] || [];
+                            const prevHasActivity = prevMatches.some((m: any) => {
+                                const mData = m.match || m;
+                                return mData.state === 'complete' || activeMatches[mData.id];
+                            });
+                            if (prevHasActivity) {
+                                visibleRounds.push(roundNum);
+                            }
+                        }
+
+                        return (
+                            <div className="mt-12">
+                                <div className="flex items-center gap-2 md:gap-3 mb-4 md:mb-6 px-2">
+                                    <LayoutList className="w-5 h-5 md:w-6 md:h-6 text-red-500" />
+                                    <h3 className="text-sm md:text-xl font-bold font-outfit tracking-wider text-white uppercase">Group Matches</h3>
+                                </div>
+                                <div className="space-y-8">
+                                    {visibleRounds.map(roundNum => (
+                                        <div key={roundNum}>
+                                            <div className="flex items-center gap-2 mb-4 px-1">
+                                                <div className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
+                                                <span className="text-yellow-500 text-[10px] font-black uppercase tracking-[0.2em]">Round {roundNum}</span>
+                                            </div>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                                {roundMap[roundNum].map(m => renderMatchCard(m, creatableIds.has(String((m.match || m).id))))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        );
+                    })()}
+
                 </div>
             );
         }
 
+        // ============================================
+        // ROUND ROBIN — Standings + Match Cards
+        // ============================================
         if (isRoundRobin) {
-            // ============================================
-            // STANDINGS ALGORITHM (For formats @g-loot doesn't support natively)
-            // ============================================
-            
-            // 1. Calculate Stats
             const stats = participants.map(p => {
                 let wins = 0;
                 let losses = 0;
@@ -391,7 +568,6 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
                 
                 matches.forEach(m => {
                     if (m.state !== 'complete') return;
-                    
                     const p1 = m.participants[0];
                     const p2 = m.participants[1];
                     
@@ -413,7 +589,6 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
                 };
             });
 
-            // 2. Sort Standings
             stats.sort((a, b) => {
                 if (a.rank !== b.rank) return a.rank - b.rank;
                 if (b.stats.points !== a.stats.points) return b.stats.points - a.stats.points;
@@ -485,252 +660,140 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
                         </div>
                     </div>
 
-                    {/* Chronological Matches (List instead of Bracket) */}
-                    <div>
-                        <div className="flex items-center gap-2 md:gap-3 mb-4 md:mb-6 px-2">
-                            <LayoutList className="w-5 h-5 md:w-6 md:h-6 text-red-500" />
-                            <h3 className="text-sm md:text-xl font-bold font-outfit tracking-wider text-white uppercase">Match Schedule</h3>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            {matches.map(match => {
-                                const matchIsOpen = match.state === 'SCHEDULED' || match.state === 'open' || match.state === 'pending';
-                                const topRosterId = rosterMap[match.participants[0]?.id];
-                                const bottomRosterId = rosterMap[match.participants[1]?.id];
-                                const isPlayerInMatch = Boolean(userChallongeId && (topRosterId === userChallongeId || bottomRosterId === userChallongeId));
-                                const liveLobbyCode = activeMatches[match.id];
+                    {/* Match Schedule — Progressive Rounds */}
+                    {(() => {
+                        const creatableIds = getCreatableMatchIds(matches);
 
-                                return (
-                                    <div key={match.id} className="relative transform hover:scale-[1.02] transition-all duration-300">
-                                        <div className="bg-black/40 border border-[#3b4b68]/50 rounded-xl p-4 shadow-lg flex flex-col justify-around gap-2 h-28 relative">
-                                            {/* Top Participant */}
-                                            <div className={`flex justify-between items-center px-3 py-1.5 rounded-md ${match.participants[0]?.isWinner ? 'bg-green-500/10 border border-green-500/20' : 'bg-white/5 border border-transparent'}`}>
-                                                <span className={`font-semibold font-outfit truncate pr-2 ${match.participants[0]?.isWinner ? 'text-green-400' : 'text-slate-300'}`}>
-                                                    {match.participants[0]?.name || 'TBD'}
-                                                </span>
-                                                <span className={`font-mono font-bold ${match.participants[0]?.isWinner ? 'text-green-400' : 'text-slate-500'}`}>
-                                                    {match.participants[0]?.resultText || '-'}
-                                                </span>
-                                            </div>
-                                            {/* Bottom Participant */}
-                                            <div className={`flex justify-between items-center px-3 py-1.5 rounded-md ${match.participants[1]?.isWinner ? 'bg-green-500/10 border border-green-500/20' : 'bg-white/5 border border-transparent'}`}>
-                                                <span className={`font-semibold font-outfit truncate pr-2 ${match.participants[1]?.isWinner ? 'text-green-400' : 'text-slate-300'}`}>
-                                                    {match.participants[1]?.name || 'TBD'}
-                                                </span>
-                                                <span className={`font-mono font-bold ${match.participants[1]?.isWinner ? 'text-green-400' : 'text-slate-500'}`}>
-                                                    {match.participants[1]?.resultText || '-'}
-                                                </span>
-                                            </div>
-                                            {/* Match Round Label */}
-                                            <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#0a101f] border border-[#3b4b68] text-yellow-500 text-[9px] uppercase tracking-widest px-2 py-0.5 rounded-full">
-                                                {match.tournamentRoundText || 'Match'}
-                                            </div>
+                        // Group matches by round
+                        const roundMap: Record<number, any[]> = {};
+                        matches.forEach((m: any) => {
+                            const round = Math.abs(m.tournamentRound || 0) || 1;
+                            if (!roundMap[round]) roundMap[round] = [];
+                            roundMap[round].push(m);
+                        });
+                        const sortedRounds = Object.keys(roundMap).map(Number).sort((a, b) => a - b);
 
-                                            {/* ACTION BUTTONS (Lobbies) */}
-                                            {!liveLobbyCode && isCaptain && isPlayerInMatch && matchIsOpen && (
-                                                <button
-                                                    onClick={async (e) => {
-                                                        e.stopPropagation();
-                                                        try {
-                                                            if (!topRosterId || !bottomRosterId) {
-                                                                toast.error('Competitors have not synced via Tournament Registrations Matrix.');
-                                                                return;
-                                                            }
-                                                            const { data: lobbyCode, error } = await supabase.rpc('create_lobby', {
-                                                                p_lobby_name: `TNK-${String(match.id).slice(-4)}`,
-                                                                p_team_a_roster_id: topRosterId,
-                                                                p_team_b_roster_id: bottomRosterId,
-                                                                p_challonge_match_id: String(match.id)
-                                                            });
-                                                            if (error) throw error;
-                                                            if (lobbyCode) {
-                                                                const codeToJoin = typeof lobbyCode === 'object' ? (lobbyCode.code || lobbyCode.id) : lobbyCode;
-                                                                navigate(`/join/${codeToJoin}`);
-                                                            }
-                                                        } catch (err: any) {
-                                                            console.error('Error creating lobby:', err);
-                                                            toast.error('Failed to create lobby: ' + err.message);
-                                                        }
-                                                    }}
-                                                    className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-slate-900 border border-sky-500/50 text-sky-400 hover:bg-sky-500/20 hover:text-white hover:border-sky-400 text-[10px] uppercase font-bold px-4 py-1 rounded-full shadow-[0_0_10px_rgba(56,189,248,0.2)] transition-all z-10"
-                                                >
-                                                    CREATE LOBBY
-                                                </button>
-                                            )}
-                                            {liveLobbyCode && (
-                                                <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 flex items-center justify-center gap-2 z-10 w-max">
-                                                    {isPlayerInMatch && (
-                                                        <button
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                navigate(`/join/${liveLobbyCode}`);
-                                                            }}
-                                                            className="bg-red-500/10 border border-red-500/50 text-red-500 hover:bg-red-500/20 hover:text-white hover:border-red-400 text-[10px] uppercase font-bold px-4 py-1 rounded-full shadow-[0_0_10px_rgba(239,68,68,0.2)] transition-all"
-                                                        >
-                                                            JOIN LOBBY
-                                                        </button>
-                                                    )}
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            navigate(`/stream/${liveLobbyCode}`);
-                                                        }}
-                                                        className="bg-purple-500/10 border border-purple-500/50 text-purple-400 hover:bg-purple-500/20 hover:text-white hover:border-purple-400 text-[10px] uppercase font-bold px-4 py-1 rounded-full shadow-[0_0_10px_rgba(168,85,247,0.2)] transition-all"
-                                                    >
-                                                        WATCH
-                                                    </button>
-                                                </div>
-                                            )}
+                        // Progressive unlock: show a round if:
+                        // - It's round 1 (always show), OR
+                        // - The previous round has at least one match that's started/complete/has a lobby
+                        const visibleRounds: number[] = [];
+                        for (let i = 0; i < sortedRounds.length; i++) {
+                            const round = sortedRounds[i];
+                            if (i === 0) {
+                                visibleRounds.push(round);
+                                continue;
+                            }
+                            const prevRound = sortedRounds[i - 1];
+                            const prevMatches = roundMap[prevRound] || [];
+                            const prevHasActivity = prevMatches.some((m: any) =>
+                                m.state === 'complete' || activeMatches[m.id]
+                            );
+                            if (prevHasActivity) {
+                                visibleRounds.push(round);
+                            }
+                        }
+
+                        return (
+                            <div>
+                                <div className="flex items-center gap-2 md:gap-3 mb-4 md:mb-6 px-2">
+                                    <LayoutList className="w-5 h-5 md:w-6 md:h-6 text-red-500" />
+                                    <h3 className="text-sm md:text-xl font-bold font-outfit tracking-wider text-white uppercase">Match Schedule</h3>
+                                </div>
+                                <div className="space-y-8">
+                                    {visibleRounds.map(round => (
+                                        <div key={round}>
+                                            <div className="flex items-center gap-2 mb-4 px-1">
+                                                <div className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
+                                                <span className="text-yellow-500 text-[10px] font-black uppercase tracking-[0.2em]">Round {round}</span>
+                                            </div>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                                {roundMap[round].map(m => renderMatchCard(m, creatableIds.has(String(m.id))))}
+                                            </div>
                                         </div>
-                                        {/* LOBBY INDICATOR LAYERED OVER */}
-                                        {liveLobbyCode && (
-                                            <div className="absolute -top-3 -right-3">
-                                                <div className="relative">
-                                                    <div className="absolute inset-0 bg-red-500 blur animate-pulse rounded-full opacity-50"></div>
-                                                    <div className="relative bg-black border border-red-500/50 text-red-500 text-[10px] font-bold tracking-widest uppercase px-3 py-1.5 rounded-full shadow-lg flex items-center gap-2">
-                                                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping"></span>
-                                                        Live
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
+                                    ))}
+                                </div>
+                            </div>
+                        );
+                    })()}
                 </div>
             );
         }
 
-        if (isDoubleElimination && matches.some(m => m.tournamentRound < 0)) {
-            // @g-loot Double Elimination expects an object { upper: [], lower: [] }
-            // In Challonge, upper bracket matches have a positive tournamentRound, lower bracket matches have negative.
-            const doubleElimMatches = {
-                upper: matches.filter(m => m.tournamentRound >= 0),
-                lower: matches.filter(m => m.tournamentRound < 0)
-            };
+        // ============================================
+        // SE / DE — Challonge Embedded Iframe + Match List
+        // ============================================
+        const challongeEmbedUrl = `https://challonge.com/${tournamentUrl}/module?theme=2&show_final_results=1`;
 
-            return (
-                <DoubleEliminationBracket
-                    matches={doubleElimMatches} 
-                    matchComponent={NeonBracketMatch}
-                    theme={theme}
-                    options={commonBracketOptions}
-                    svgWrapper={({ children, ...props }: React.PropsWithChildren<any>) => {
-                        const baseW = Number(props.bracketWidth || props.width) || 10000;
-                        const baseH = Number(props.bracketHeight || props.height) || 5000;
-                        const finalW = Math.max(baseW + 1200, 2000);
-                        const finalH = Math.max(baseH + 600, 1000);
-                        const { bracketWidth, bracketHeight, width, height, ...restProps } = props;
-                        
-                        return (
-                            <div 
-                                ref={containerRef}
-                                className="bracket-scroll-container w-full h-[60vh] md:h-[85vh] overflow-hidden bg-[#050b14] relative"
-                            >
-                                <SVGViewer 
-                                    {...restProps}
-                                    width={finalW} 
-                                    height={finalH}
-                                    bracketWidth={finalW}
-                                    bracketHeight={finalH}
-                                    background="#050b14"
-                                    SVGBackground="#050b14"
-                                    detectAutoPan={false}
-                                    scaleFactorOnWheel={1.06}
-                                    onPan={() => {}}
-                                    onZoom={() => {}}
-                                    className="transform-gpu"
-                                >
-                                    {children}
-                                </SVGViewer>
-                                {isModerator && (
-                                    <button
-                                        onClick={(e) => { e.stopPropagation(); handleRefreshBracket(); }}
-                                        className="absolute top-3 right-3 z-50 p-2 bg-black/60 border border-white/10 hover:border-white/30 rounded-lg text-slate-400 hover:text-white transition-all backdrop-blur-sm"
-                                        title="Refresh Bracket"
-                                    >
-                                        <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} />
-                                    </button>
-                                )}
-                            </div>
-                        );
-                    }}
-                />
-            );
-        }
+        const creatableIds = getCreatableMatchIds(matches);
 
-        // Default Single Elimination
-        // Safety check to prevent library crash if array lacks structured IDs
-        if (matches.length === 0) {
-            return <div className="text-slate-500 p-12 text-center text-xs tracking-widest uppercase">Single Elim Bracket Generation Pending</div>;
-        }
+        // Separate open/live matches for the action panel
+        const actionableMatches = matches.filter((m: any) => {
+            const isOpen = m.state === 'SCHEDULED' || m.state === 'open' || m.state === 'pending';
+            const hasLobby = !!activeMatches[m.id];
+            const topRosterId = rosterMap[m.participants[0]?.id];
+            const bottomRosterId = rosterMap[m.participants[1]?.id];
+            const isPlayerInMatch = Boolean(userChallongeId && (topRosterId === userChallongeId || bottomRosterId === userChallongeId));
+            // Show if: it's the creatable match, has a live lobby, or player is in an open match
+            return creatableIds.has(String(m.id)) || hasLobby || (isOpen && isPlayerInMatch && m.participants[0]?.id && m.participants[1]?.id);
+        });
 
         return (
-            <SingleEliminationBracket
-                matches={matches}
-                matchComponent={NeonBracketMatch}
-                theme={theme}
-                options={commonBracketOptions}
-                svgWrapper={({ children, ...props }: React.PropsWithChildren<any>) => {
-                    const baseW = Number(props.bracketWidth || props.width) || 10000;
-                    const baseH = Number(props.bracketHeight || props.height) || 2000;
-                    const finalW = Math.max(baseW + 800, 1500);
-                    const finalH = Math.max(baseH + 400, 800);
-                    const { bracketWidth, bracketHeight, width, height, ...restProps } = props;
+            <div className="w-full space-y-6">
+                {/* Challonge Bracket Embed */}
+                <div className="relative w-full rounded-2xl overflow-hidden border border-white/10 bg-black/40 shadow-[0_0_40px_rgba(0,0,0,0.5)]">
+                    <div className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-white/5 to-transparent border-b border-white/5">
+                        <Trophy size={14} className="text-yellow-500" />
+                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Live Bracket</span>
+                    </div>
+                    {/* Clip container: hides the "Powered by Challonge" footer at the bottom */}
+                    <div className="overflow-hidden" style={{ height: '500px' }}>
+                        <iframe
+                            src={challongeEmbedUrl}
+                            width="100%"
+                            height="540"
+                            frameBorder="0"
+                            scrolling="auto"
+                            allowTransparency={true}
+                            className="w-full"
+                            style={{ background: '#050b14', marginBottom: '-40px' }}
+                            title="Tournament Bracket"
+                        />
+                    </div>
+                </div>
 
-                    return (
-                        <div 
-                            ref={containerRef}
-                            className="bracket-scroll-container w-full h-[85vh] overflow-hidden bg-[#050b14] relative"
-                        >
-                            <SVGViewer 
-                                {...restProps}
-                                width={finalW} 
-                                height={finalH}
-                                bracketWidth={finalW}
-                                bracketHeight={finalH}
-                                background="#050b14"
-                                SVGBackground="#050b14"
-                                detectAutoPan={false}
-                                scaleFactorOnWheel={1.06}
-                                onPan={() => {}}
-                                onZoom={() => {}}
-                                className="transform-gpu"
-                            >
-                                {children}
-                            </SVGViewer>
-                            {isModerator && (
-                                <button
-                                    onClick={(e) => { e.stopPropagation(); handleRefreshBracket(); }}
-                                    className="absolute top-3 right-3 z-50 p-2 bg-black/60 border border-white/10 hover:border-white/30 rounded-lg text-slate-400 hover:text-white transition-all backdrop-blur-sm"
-                                    title="Refresh Bracket"
-                                >
-                                    <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} />
-                                </button>
-                            )}
+                {/* Your Matches Panel (only show if there are actionable matches) */}
+                {actionableMatches.length > 0 && (
+                    <div className="space-y-4">
+                        <div className="flex items-center gap-2 px-2">
+                            <Swords className="w-5 h-5 text-sky-400" />
+                            <h3 className="text-sm font-bold font-outfit tracking-wider text-white uppercase">Your Matches</h3>
                         </div>
-                    );
-                }}
-            />
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {actionableMatches.map(m => renderMatchCard(m, creatableIds.has(String(m.id))))}
+                        </div>
+                    </div>
+                )}
+            </div>
         );
     };
 
     return (
-        <div className="w-full h-full bg-[#050b14] rounded-2xl border border-white/5 shadow-2xl relative overflow-hidden">
-            {/* CSS to hide scrollbars while keeping scroll functionality */}
-            <style>{`
-                .bracket-scroll-container {
-                    scrollbar-width: none; /* Firefox */
-                    -ms-overflow-style: none; /* IE/Edge */
-                }
-                .bracket-scroll-container::-webkit-scrollbar {
-                    display: none; /* Chrome/Safari/Opera */
-                }
-            `}</style>
-            
-            {/* Action Bar Overlay */}
+        <div className="w-full h-full bg-gradient-to-b from-[#060c17] to-[#050b14] rounded-2xl border border-white/5 shadow-2xl relative overflow-hidden p-4">
+            {/* Decorative background glow */}
+            <div className="absolute inset-0 pointer-events-none">
+                <div className="absolute top-0 left-1/4 w-96 h-96 bg-blue-500/3 rounded-full blur-3xl" />
+                <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-purple-500/3 rounded-full blur-3xl" />
+            </div>
+
+            {/* Refresh Button */}
             <div className="absolute top-4 right-4 z-50 flex items-center gap-3">
+                <button
+                    onClick={(e) => { e.stopPropagation(); handleRefreshBracket(); }}
+                    className="p-2.5 bg-black/60 border border-white/10 hover:border-white/30 rounded-xl text-slate-400 hover:text-white transition-all backdrop-blur-sm shadow-lg"
+                    title="Refresh Bracket"
+                >
+                    <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
+                </button>
                 {isRefreshing && (
                     <span className="text-red-500 font-mono text-xs uppercase tracking-widest animate-pulse">
                         Syncing...
@@ -738,17 +801,9 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
                 )}
             </div>
 
-            <StyleSheetManager shouldForwardProp={(prop) => !['won', 'hovered', 'highlighted', 'bottomHovered', 'topHovered'].includes(prop)}>
-                <BracketContext.Provider value={{ 
-                    currentUserChallongeId: userChallongeId,
-                    isCaptain,
-                    tournamentUrl,
-                    activeMatches,
-                    rosterMap
-                }}>
-                    {renderBracketOrStandings()}
-                </BracketContext.Provider>
-            </StyleSheetManager>
+            <div className="relative z-10">
+                {renderBracketOrStandings()}
+            </div>
         </div>
     );
 };

@@ -134,7 +134,7 @@ export const TournamentHub: React.FC = () => {
                 name: formTitle,
                 url: formChallongeUrl,
                 tournamentType: formTournamentType,
-                groupStagesEnabled: formGroupStages
+                groupStagesEnabled: formGroupStages && formTournamentType !== 'round robin',
             });
 
             // 2. Mirror into Staging Database
@@ -156,7 +156,7 @@ export const TournamentHub: React.FC = () => {
         onSuccess: () => {
             // Invalidate cache so the list auto-reloads
             queryClient.invalidateQueries({ queryKey: ['tournaments'] });
-            // Reset form
+            // Reset form & close creation modal
             setShowCreateModal(false);
             setFormTitle('');
             setFormChallongeUrl('');
@@ -545,6 +545,8 @@ export const TournamentHub: React.FC = () => {
                                         </div>
                                     </label>
                                     )}
+
+
                                 </div>
 
                                 {creationError && (
