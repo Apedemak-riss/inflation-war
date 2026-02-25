@@ -307,6 +307,21 @@ export const TournamentView: React.FC = () => {
         finally { setIsProcessing(false); }
     };
 
+    const handleStartFinalStage = async () => {
+        setIsProcessing(true);
+        try {
+            await toast.promise(
+                (async () => {
+                    await startTournament(tournament.challonge_url);
+                    setChallongeState('underway');
+                    await fetchTournamentData();
+                })(),
+                { loading: 'Starting Final Stage...', success: 'Final Stage Started! Matches are now open.', error: (err) => 'Failed to start final stage: ' + err.message }
+            );
+        } catch { /* toast.promise handles display */ }
+        finally { setIsProcessing(false); }
+    };
+
     const handleSyncMatches = async () => {
         setIsSyncing(true);
         try {
@@ -623,6 +638,21 @@ export const TournamentView: React.FC = () => {
                                             <span className="flex items-center gap-3">
                                                 <Trophy size={18} className="group-hover:scale-110 transition-transform text-amber-500" />
                                                 FINALIZE GROUP STAGE
+                                            </span>
+                                            <ChevronRight size={16} className="opacity-50" />
+                                        </button>
+                                    )}
+
+                                    {/* START FINAL STAGE */}
+                                    {tournament.group_stages_enabled && challongeState === 'group_stages_finalized' && tournament.status === 'active' && (
+                                        <button 
+                                            onClick={handleStartFinalStage}
+                                            disabled={isProcessing}
+                                            className="w-full flex items-center justify-between p-4 bg-emerald-900/20 border border-emerald-500/30 hover:bg-emerald-800/40 hover:border-emerald-400 text-emerald-100 rounded-xl transition-all font-black tracking-widest text-sm shadow-[0_0_15px_rgba(52,211,153,0.1)] group disabled:opacity-50 mt-2"
+                                        >
+                                            <span className="flex items-center gap-3">
+                                                <MonitorPlay size={18} className="group-hover:scale-110 transition-transform text-emerald-500" />
+                                                START FINAL STAGE
                                             </span>
                                             <ChevronRight size={16} className="opacity-50" />
                                         </button>

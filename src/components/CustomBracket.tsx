@@ -151,12 +151,38 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
                     const rMap: Record<string, string> = {};
                     const nMap: Record<string, string> = {};
                     regs.forEach(r => {
-                        rMap[r.challonge_participant_id] = r.roster_id;
+                        const targetId = String(r.challonge_participant_id);
+                        rMap[targetId] = r.roster_id;
                         const rosterData = r.rosters as any;
                         if (rosterData && rosterData.name) {
-                            nMap[r.challonge_participant_id] = rosterData.name;
+                            nMap[targetId] = rosterData.name;
                         }
                     });
+
+                    // Two-Stage Match Card Fix: Challonge generates new IDs for Elimination Phase participants.
+                    // However, their `group_player_ids` array contains the Group Stage participant ID (which maps to our DB Main ID).
+                    // We loop through the API participants and strictly alias any new "Final Stage" IDs back to their known Main IDs.
+                    participantsData.forEach((p: any) => {
+                        if (p.group_player_ids && Array.isArray(p.group_player_ids)) {
+                            p.group_player_ids.forEach((gid: any) => {
+                                const groupIdStr = String(gid);
+                                const participantIdStr = String(p.id);
+                                
+                                // If the group ID is found in our DB mapping, assign the new participant ID to the exact same Roster ID.
+                                if (rMap[groupIdStr]) {
+                                    rMap[participantIdStr] = rMap[groupIdStr];
+                                    nMap[participantIdStr] = nMap[groupIdStr];
+                                }
+                                
+                                // Failsafe: Should the NEW ID be the Main ID instead, alias the Group ID back to it.
+                                if (rMap[participantIdStr] && !rMap[groupIdStr]) {
+                                    rMap[groupIdStr] = rMap[participantIdStr];
+                                    nMap[groupIdStr] = nMap[participantIdStr];
+                                }
+                            });
+                        }
+                    });
+
                     setRosterMap(rMap);
                     setNameMap(nMap);
                 }
