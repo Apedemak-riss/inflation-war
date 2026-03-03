@@ -18,12 +18,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
 
 // --- TYPES ---
-const HERO_LINK_IDS: Record<string, number> = { BK: 0, AQ: 1, GW: 2, RC: 4, MP: 6 };
+const HERO_LINK_IDS: Record<string, number> = { BK: 0, AQ: 1, GW: 2, RC: 4, MP: 6, DD: 7 };
 const LIMITS = { troop: 340, siege: 3, spell: 11 };
 const CC_LIMITS = { troop: 55, siege: 2, spell: 4 };
 
 type ItemType = 'troop' | 'siege' | 'spell' | 'super_troop' | 'equipment' | 'pet';
-type HeroType = 'BK' | 'AQ' | 'GW' | 'RC' | 'MP' | null;
+type HeroType = 'BK' | 'AQ' | 'GW' | 'RC' | 'MP' | 'DD' | null;
 
 type Item = { 
   id: string; name: string; base_price: number; coc_id: number; 
@@ -163,6 +163,10 @@ const getImageUrl = (name: string, type: string, hero?: string | null) => {
   if (name === "Meteor Golem") return "/meteor-golem.png";
   if (name === "Stick Horse") return "/stick-horse.png";
   if (name === "Heroic Torch") return "/heroic-torch.png";
+  if (name === "Fire Heart") return "/fire-heart.png";
+  if (name === "Flame Breath") return "/flame-breath.png";
+  if (name === "Stun Blast") return "/stun-blast.png";
+  if (name === "Greedy Raven") return "/greedy-raven.png";
   const REPO_ROOT = "https://cdn.jsdelivr.net/gh/ClashKingInc/ClashKingAssets@main/assets/home-base";
   if (type === 'pet') return `${REPO_ROOT}/pet-pics/Icon_HV_Hero_Pets_${name.replace(/ /g, "_")}.png`;
   if (type === 'equipment' && hero) {
@@ -856,7 +860,7 @@ function AppContent() {
     };
     const main = myPurchases.filter(p => !p.is_cc); const cc = myPurchases.filter(p => p.is_cc);
     const hParts: string[] = [];
-    ['BK', 'AQ', 'GW', 'RC', 'MP'].forEach(h => {
+    ['BK', 'AQ', 'GW', 'RC', 'MP', 'DD'].forEach(h => {
         const pet = main.find(p => getItem(p.item_id)?.type === 'pet' && p.equipped_hero === h);
         const eqs = main.filter(p => getItem(p.item_id)?.type === 'equipment' && getItem(p.item_id)?.hero === h).map(p => getItem(p.item_id)!.coc_id);
         if (pet || eqs.length > 0) hParts.push(`${HERO_LINK_IDS[h]}${pet ? 'p' + getItem(pet.item_id)!.coc_id : ''}${eqs.length ? 'e' + eqs.join('_') : ''}`);
@@ -923,7 +927,7 @@ function AppContent() {
     return (
         <div className={isLarge ? "space-y-4" : "space-y-1"}>
             <div className="flex flex-wrap gap-2 mb-3">
-                {['BK', 'AQ', 'GW', 'RC', 'MP'].filter(h => active.some((i: any) => !i.is_cc && (i.hero === h || i.equipped_hero === h))).map(h => (
+                {['BK', 'AQ', 'GW', 'RC', 'MP', 'DD'].filter(h => active.some((i: any) => !i.is_cc && (i.hero === h || i.equipped_hero === h))).map(h => (
                     <div key={h} className="group relative bg-white/5 p-1 rounded-lg border border-white/5 hover:border-yellow-500/30 flex items-center gap-1 transition-all">
                         <div className="relative">
                              <img src={`/${h.toLowerCase()}.png`} className="w-8 h-8 rounded-md border border-white/10 object-cover shadow-sm group-hover:grayscale-0 grayscale-[0.3] transition-all"/>
@@ -1937,14 +1941,14 @@ function AppContent() {
                   <h3 className="text-4xl font-black mb-10 tracking-tighter text-center flex items-center justify-center gap-4">
                       DEPLOY <span className="text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-emerald-600">{petModalItem.name.toUpperCase()}</span>
                   </h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-6 relative z-10">
-                      {['BK', 'AQ', 'GW', 'RC', 'MP'].map(hero => (
-                          <button key={hero} onClick={() => handleBuy(petModalItem, hero)} className="glass bg-black/40 hover:bg-green-500/10 border border-white/5 hover:border-green-500/50 rounded-[1.5rem] p-6 flex flex-col items-center gap-4 transition-all group shadow-lg hover:-translate-y-1 duration-300">
+                  <div className="grid grid-cols-3 sm:grid-cols-3 lg:grid-cols-6 gap-4 sm:gap-6 relative z-10">
+                      {['BK', 'AQ', 'GW', 'RC', 'MP', 'DD'].map(hero => (
+                          <button key={hero} onClick={() => handleBuy(petModalItem, hero)} className="glass bg-black/40 hover:bg-green-500/10 border border-white/5 hover:border-green-500/50 rounded-[1.5rem] aspect-square flex flex-col items-center justify-center gap-3 transition-all group shadow-lg hover:-translate-y-1 duration-300">
                               <div className="relative">
                                   <div className="absolute inset-0 bg-green-500 blur-md opacity-0 group-hover:opacity-40 transition-opacity rounded-full"></div>
-                                  <img src={`/${hero.toLowerCase()}.png`} className="w-20 h-20 rounded-2xl border-2 border-slate-700 group-hover:border-green-500 object-cover relative z-10 shadow-2xl grayscale-[0.5] group-hover:grayscale-0 transition-all"/>
+                                  <img src={`/${hero.toLowerCase()}.png`} className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl border-2 border-slate-700 group-hover:border-green-500 object-cover relative z-10 shadow-2xl grayscale-[0.5] group-hover:grayscale-0 transition-all"/>
                               </div>
-                              <span className="font-black text-xs tracking-[0.2em] text-slate-500 group-hover:text-green-400 transition-colors">{hero}</span>
+                              <span className="font-black text-[10px] sm:text-xs tracking-[0.2em] text-slate-500 group-hover:text-green-400 transition-colors">{hero}</span>
                           </button>
                       ))}
                   </div>
@@ -2013,7 +2017,7 @@ function AppContent() {
                     </div>
                 </div>
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 lg:gap-10">
-                    {['BK','AQ','GW','RC','MP'].map(h => {  
+                    {['BK','AQ','GW','RC','MP','DD'].map(h => {  
                         const hItems = dbItems.filter(i => i.hero === h); 
                         if (hItems.length === 0) return null; 
                         return (
@@ -2090,7 +2094,7 @@ function AppContent() {
         </main>
 
         {/* Floating Export Button */}
-        <div className="fixed bottom-0 left-0 w-full lg:w-[calc(100%-24rem)] pointer-events-none p-4 lg:p-10 z-[100] flex justify-center bg-gradient-to-t from-[#050b14] to-transparent">
+        <div className={`fixed bottom-0 left-0 w-full lg:w-[calc(100%-24rem)] pointer-events-none p-4 lg:p-10 z-[90] flex justify-center bg-gradient-to-t from-[#050b14] to-transparent transition-opacity duration-300 ${petModalItem ? 'opacity-0 pointer-events-none' : ''}`}>
             {isLocked ? (
                 <button onClick={exportArmy} className="pointer-events-auto bg-slate-800/80 hover:bg-slate-700 px-6 py-4 lg:px-16 lg:py-6 rounded-2xl font-black flex gap-3 lg:gap-4 items-center justify-center transition-all shadow-xl text-sm lg:text-base uppercase tracking-[0.2em] text-slate-400 border border-white/10 backdrop-blur-md w-full lg:w-auto">
                      <Lock size={20} className="lg:w-6 lg:h-6"/> LOCKED & DEPLOYED
@@ -2125,7 +2129,7 @@ function AppContent() {
             </div>
             
             <div className="flex-1 p-4 lg:p-6 space-y-4 lg:space-y-6 relative z-10 pb-32">
-                {['BK', 'AQ', 'GW', 'RC', 'MP'].filter(h => myPurchases.filter(p => !p.is_cc).map(p => ({ equipped_hero: p.equipped_hero, ...dbItems.find(i => i.id === p.item_id) })).some(i => i.hero === h || i.equipped_hero === h)).map(h => {
+                {['BK', 'AQ', 'GW', 'RC', 'MP', 'DD'].filter(h => myPurchases.filter(p => !p.is_cc).map(p => ({ equipped_hero: p.equipped_hero, ...dbItems.find(i => i.id === p.item_id) })).some(i => i.hero === h || i.equipped_hero === h)).map(h => {
                     const active = myPurchases.filter(p => !p.is_cc).map(p => ({ equipped_hero: p.equipped_hero, ...dbItems.find(i => i.id === p.item_id) })).filter(Boolean) as any[];
                     return (
                         <div key={h} className="glass rounded-2xl p-4 lg:p-5 border border-white/5 shadow-sm relative overflow-hidden group hover:border-blue-500/30 transition-colors bg-black/20">
