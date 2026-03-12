@@ -20,7 +20,7 @@ import { formatDistanceToNow } from 'date-fns';
 // --- TYPES ---
 const HERO_LINK_IDS: Record<string, number> = { BK: 0, AQ: 1, GW: 2, RC: 4, MP: 6, DD: 7 };
 const LIMITS = { troop: 340, siege: 3, spell: 11 };
-const CC_LIMITS = { troop: 55, siege: 2, spell: 4 };
+const CC_LIMITS = { troop: 55, spell: 4 };
 
 type ItemType = 'troop' | 'siege' | 'spell' | 'super_troop' | 'equipment' | 'pet';
 type HeroType = 'BK' | 'AQ' | 'GW' | 'RC' | 'MP' | 'DD' | null;
@@ -30,6 +30,7 @@ type Item = {
   type: ItemType; hero?: HeroType; housing_space: number; 
   inflation_rate: number; is_fixed: boolean;
   inflation_type?: 'linear' | 'exponential' | 'flat';
+  inflation_start_threshold?: number;
 };
 
 // --- RAW DATA ---
@@ -286,11 +287,21 @@ function AppContent() {
   const [showSandbox, setShowSandbox] = useState(false);
   const [poppingItem, setPoppingItem] = useState<string | null>(null);
 
-  const handleUpdateItem = async (itemId: string, newBase: number, newInf: number, infType: string) => {
+  const handleUpdateItem = async (itemId: string, newBase: number, newInf: number, infType: string, threshold: number = 0) => {
       setIsProcessing(true);
-      await supabase.from('items').update({ base_price: newBase, inflation_rate: newInf, inflation_type: infType, is_fixed: infType === 'flat' }).eq('id', itemId);
+      await supabase.from('items').update({ base_price: newBase, inflation_rate: newInf, inflation_type: infType, is_fixed: infType === 'flat', inflation_start_threshold: threshold }).eq('id', itemId);
       await checkDatabase(); 
       setIsProcessing(false);
+  };
+
+  const handleUpdateBudget = async (newBudget: number) => {
+      if (!foundLobby?.id) return;
+      setIsProcessing(true);
+      await supabase.from('teams').update({ budget: newBudget }).eq('lobby_id', foundLobby.id);
+      setTeamBudget(newBudget);
+      await fetchTeams(foundLobby.id);
+      setIsProcessing(false);
+      toast.success(`All teams budget set to ${newBudget} gold`);
   };
 
   // --- INIT ---
@@ -739,24 +750,22 @@ function AppContent() {
     if (item.type === 'pet' && !targetHero && !isCC) { setPetModalItem(item); return; }
     
     const count = teamPurchases.filter(x => x.item_id === item.id && !x.is_cc).length;
-    const p = isCC ? 0 : (item.type === 'pet' ? 0 : (
+    const threshold = item.inflation_start_threshold || 0;
+    const effectiveCount = Math.max(0, count - threshold);
+    const p = isCC ? 0 : (
         (item.is_fixed || item.inflation_type === 'flat') ? item.base_price : 
-        (item.inflation_type === 'exponential' ? item.base_price * Math.pow((item.inflation_rate || 2), count) : 
-        item.base_price + (count * (item.inflation_rate || 2)))
-    ));
+        (count < threshold ? item.base_price :
+        (item.inflation_type === 'exponential' ? item.base_price * Math.pow((item.inflation_rate || 2), effectiveCount) : 
+        item.base_price + (effectiveCount * (item.inflation_rate || 2))))
+    );
     if (teamBudget < p) { toast.error('Not enough budget.'); return; }
 
     let cat: any = 'troop';
     if (item.type === 'spell') cat = 'spell'; else if (item.type === 'siege') cat = 'siege'; else if (item.type === 'equipment') cat = 'equipment';
     if (isCC) {
-        if (item.type === 'pet' || item.type === 'equipment') { toast.error('Pets/Equipment cannot go in Clan Castle'); return; }
-        if (item.type === 'siege') {
-             const ccSiegeCount = myPurchases.filter(p => p.is_cc && dbItems.find(i => i.id === p.item_id)?.type === 'siege').length;
-             if (ccSiegeCount >= 2) { toast.error('CC Sieges Full'); return; }
-        } else {
-             const current = getCurrentWeight(cat, true);
-             if (current + item.housing_space > CC_LIMITS[cat as keyof typeof CC_LIMITS]) { toast.error('CC Full'); return; }
-        }
+        if (item.type === 'pet' || item.type === 'equipment' || item.type === 'siege') { toast.error('Pets/Equipment/Sieges cannot go in Clan Castle'); return; }
+        const current = getCurrentWeight(cat as 'troop'|'spell', true);
+        if (current + item.housing_space > CC_LIMITS[cat as keyof typeof CC_LIMITS]) { toast.error('CC Full'); return; }
     } else if (cat !== 'equipment' && item.type !== 'pet') {
              const current = getCurrentWeight(cat, false);
              if (current + item.housing_space > LIMITS[cat as keyof typeof LIMITS]) { toast.error('Army Full'); return; }
@@ -825,14 +834,23 @@ function AppContent() {
         if (item) {
             const n = teamCounts[id];
             let cost = 0;
+            const threshold = item.inflation_start_threshold || 0;
             if (item.is_fixed || item.inflation_type === 'flat') {
                 cost = item.base_price * n;
-            } else if (item.inflation_type === 'exponential') {
-                const rate = item.inflation_rate || 2;
-                cost = rate === 1 ? (item.base_price * n) : item.base_price * ((Math.pow(rate, n) - 1) / (rate - 1));
+            } else if (n <= threshold) {
+                // All units within flat threshold
+                cost = item.base_price * n;
             } else {
-                const rate = item.inflation_rate || 2;
-                cost = (item.base_price * n) + (rate * (n * (n - 1)) / 2);
+                // Flat portion + inflated portion
+                const flatCost = item.base_price * threshold;
+                const effectiveN = n - threshold;
+                if (item.inflation_type === 'exponential') {
+                    const rate = item.inflation_rate || 2;
+                    cost = flatCost + (rate === 1 ? (item.base_price * effectiveN) : item.base_price * ((Math.pow(rate, effectiveN) - 1) / (rate - 1)));
+                } else {
+                    const rate = item.inflation_rate || 2;
+                    cost = flatCost + (item.base_price * effectiveN) + (rate * (effectiveN * (effectiveN - 1)) / 2);
+                }
             }
             grandTotal += cost;
             breakdown.push({ name: item.name, count: n, cost });
@@ -890,11 +908,14 @@ function AppContent() {
 
   // --- HELPERS FOR UI ---
   const calcPrice = (item: Item, isCC: boolean = false) => {
-      if (isCC || item.type === 'pet') return 0;
+      if (isCC) return 0;
       if (item.is_fixed || item.inflation_type === 'flat') return item.base_price;
       const count = teamPurchases.filter(p => p.item_id === item.id && !p.is_cc).length;
-      if (item.inflation_type === 'exponential') return item.base_price * Math.pow((item.inflation_rate || 2), count);
-      return item.base_price + (count * (item.inflation_rate || 2));
+      const threshold = item.inflation_start_threshold || 0;
+      if (count < threshold) return item.base_price;
+      const effectiveCount = count - threshold;
+      if (item.inflation_type === 'exponential') return item.base_price * Math.pow((item.inflation_rate || 2), effectiveCount);
+      return item.base_price + (effectiveCount * (item.inflation_rate || 2));
   };
   const getCurrentWeight = (cat: 'troop'|'spell'|'siege', isCC: boolean = false) => myPurchases.reduce((s,p)=>{ if(!!p.is_cc!==isCC)return s; const i=dbItems.find(x=>x.id===p.item_id); if(!i)return s; if(cat==='troop' && (i.type==='troop'||i.type==='super_troop'))return s+i.housing_space; if(cat==='spell' && i.type==='spell')return s+i.housing_space; if(cat==='siege' && i.type==='siege')return s+i.housing_space; return s; },0);
   const getMyCount = (id: string, isCC: boolean) => myPurchases.filter(p=>p.item_id===id && !!p.is_cc===isCC).length;
@@ -1125,7 +1146,6 @@ function AppContent() {
     const active = ccItems.map(p => dbItems.find(i => i.id === p.item_id)).filter(Boolean) as Item[];
     const counts: any = {}; active.forEach(i => counts[i.id] = (counts[i.id] || 0) + 1);
     const unique = Array.from(new Map(active.map(i => [i.id, i])).values());
-    const getCount = (cat: string) => myPurchases.filter(p => p.is_cc && dbItems.find(i => i.id === p.item_id)?.type === cat).length;
     
     return (
       <div className="relative group bg-orange-950/10 border border-orange-500/20 rounded-2xl p-4 mb-4 overflow-hidden hover:border-orange-500/40 transition-colors">
@@ -1136,21 +1156,16 @@ function AppContent() {
             <div className="p-1 bg-orange-500/20 rounded shadow-[0_0_10px_rgba(249,115,22,0.2)]"><Castle size={14} className="text-orange-400"/></div> 
             REINFORCEMENTS
         </div>
-        
-        <div className="flex justify-between gap-2 mb-4 relative z-10 text-[9px] font-bold uppercase tracking-wider text-orange-500/60">
-             <div className="flex flex-col items-center bg-[#0a101f] flex-1 py-2 rounded-lg border border-orange-500/10">
-                 <span>Troops</span>
-                 <span className="text-orange-400 text-xs">{getCurrentWeight('troop', true)}<span className="opacity-50">/55</span></span>
-             </div>
-             <div className="flex flex-col items-center bg-[#0a101f] flex-1 py-2 rounded-lg border border-orange-500/10">
-                 <span>Spells</span>
-                 <span className="text-orange-400 text-xs">{getCurrentWeight('spell', true)}<span className="opacity-50">/4</span></span>
-             </div>
-             <div className="flex flex-col items-center bg-[#0a101f] flex-1 py-2 rounded-lg border border-orange-500/10">
-                 <span>Sieges</span>
-                 <span className="text-orange-400 text-xs">{getCount('siege')}<span className="opacity-50">/2</span></span>
-             </div>
-        </div>
+              <div className="flex justify-between gap-2 mb-4 relative z-10 text-[9px] font-bold uppercase tracking-wider text-orange-500/60">
+              <div className="flex flex-col items-center bg-[#0a101f] flex-1 py-2 rounded-lg border border-orange-500/10">
+                  <span>Troops</span>
+                  <span className="text-orange-400 text-xs">{getCurrentWeight('troop', true)}<span className="opacity-50">/55</span></span>
+              </div>
+              <div className="flex flex-col items-center bg-[#0a101f] flex-1 py-2 rounded-lg border border-orange-500/10">
+                  <span>Spells</span>
+                  <span className="text-orange-400 text-xs">{getCurrentWeight('spell', true)}<span className="opacity-50">/4</span></span>
+              </div>
+         </div>
 
         <div className="flex flex-wrap gap-2 relative z-10 min-h-[40px]">
             {unique.map(i => (
@@ -1191,27 +1206,20 @@ function AppContent() {
                        <p className="text-orange-500/50 text-[10px] font-bold uppercase tracking-[0.2em] mt-2 ml-14">Clan Castle Requisitions</p>
                    </div>
                </div>
-               
-               <div className="grid grid-cols-1 md:grid-cols-3 gap-8 relative z-10">
-                   <div className="space-y-4">
-                       <h5 className="flex items-center gap-2 text-[10px] font-black text-orange-400 uppercase tracking-widest bg-orange-950/20 p-2 rounded border border-orange-500/10">
-                           <Sword size={12}/> Troops <span className="ml-auto opacity-50">Max 55</span>
-                       </h5>
-                       {renderMiniGrid(dbItems.filter(i => i.type === 'troop' || i.type === 'super_troop'))}
-                   </div>
-                   <div className="space-y-4">
-                       <h5 className="flex items-center gap-2 text-[10px] font-black text-orange-400 uppercase tracking-widest bg-orange-950/20 p-2 rounded border border-orange-500/10">
-                           <Hammer size={12}/> Sieges <span className="ml-auto opacity-50">Max 2</span>
-                       </h5>
-                       {renderMiniGrid(dbItems.filter(i => i.type === 'siege'))}
-                   </div>
-                   <div className="space-y-4">
-                       <h5 className="flex items-center gap-2 text-[10px] font-black text-orange-400 uppercase tracking-widest bg-orange-950/20 p-2 rounded border border-orange-500/10">
-                           <Hexagon size={12}/> Spells <span className="ml-auto opacity-50">Max 4</span>
-                       </h5>
-                       {renderMiniGrid(dbItems.filter(i => i.type === 'spell'))}
-                   </div>
-               </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 relative z-10">
+                    <div className="space-y-4">
+                        <h5 className="flex items-center gap-2 text-[10px] font-black text-orange-400 uppercase tracking-widest bg-orange-950/20 p-2 rounded border border-orange-500/10">
+                            <Sword size={12}/> Troops <span className="ml-auto opacity-50">Max 55</span>
+                        </h5>
+                        {renderMiniGrid(dbItems.filter(i => i.type === 'troop' || i.type === 'super_troop'))}
+                    </div>
+                    <div className="space-y-4">
+                        <h5 className="flex items-center gap-2 text-[10px] font-black text-orange-400 uppercase tracking-widest bg-orange-950/20 p-2 rounded border border-orange-500/10">
+                            <Hexagon size={12}/> Spells <span className="ml-auto opacity-50">Max 4</span>
+                        </h5>
+                        {renderMiniGrid(dbItems.filter(i => i.type === 'spell'))}
+                    </div>
+                </div>
           </div>
       )
   };
@@ -1795,12 +1803,31 @@ function AppContent() {
                             <p className="text-blue-400/60 font-bold uppercase tracking-widest text-[10px] mt-1">Live Database Override Controls</p>
                         </div>
                     </div>
+
+                    {/* Budget Control */}
+                    <div className="mb-8 bg-yellow-900/10 border border-yellow-500/20 rounded-2xl p-6 relative z-10">
+                        <h3 className="text-lg font-black text-yellow-400 tracking-widest uppercase mb-4 flex items-center gap-3">
+                            <Coins size={20}/> GLOBAL TEAM BUDGET
+                        </h3>
+                        <div className="flex items-center gap-4">
+                            <input id="sandbox-budget" type="number" defaultValue={lobbyTeams[0]?.budget ?? 100} className="w-32 bg-black/60 border border-yellow-500/20 rounded-lg p-3 text-center text-yellow-400 font-mono font-black text-lg outline-none focus:border-yellow-500 transition-colors" />
+                            <span className="text-yellow-500/60 font-bold text-xs uppercase tracking-widest">Gold per team</span>
+                            <button disabled={isProcessing} onClick={() => {
+                                const val = parseInt((document.getElementById('sandbox-budget') as HTMLInputElement).value);
+                                if (!isNaN(val) && val > 0) handleUpdateBudget(val);
+                            }} className="bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 px-6 py-3 rounded-lg hover:bg-yellow-500 hover:text-black transition-all text-[10px] font-black uppercase tracking-widest shadow-sm active:scale-95 disabled:opacity-50">
+                                Apply to All Teams
+                            </button>
+                        </div>
+                    </div>
+
                     <div className="overflow-x-auto custom-scrollbar relative z-10 max-h-[700px] bg-black/20 rounded-2xl">
                         {[
                             { title: 'EQUIPMENT', types: ['equipment'] },
                             { title: 'TROOPS', types: ['troop', 'super_troop'] },
                             { title: 'SPELLS', types: ['spell'] },
-                            { title: 'SIEGES', types: ['siege'] }
+                            { title: 'SIEGES', types: ['siege'] },
+                            { title: 'PETS', types: ['pet'] }
                         ].map(category => {
                             const catItems = dbItems.filter(i => category.types.includes(i.type));
                             if (catItems.length === 0) return null;
@@ -1809,13 +1836,14 @@ function AppContent() {
                                     <div className="bg-blue-900/20 px-6 py-4 border-b border-blue-500/20">
                                         <h3 className="text-xl font-black text-blue-400 tracking-widest uppercase">{category.title}</h3>
                                     </div>
-                                    <table className="w-full text-left border-collapse min-w-[800px]">
+                                    <table className="w-full text-left border-collapse min-w-[900px]">
                                         <thead className="bg-black/40">
                                             <tr className="border-b border-white/5 text-slate-400 text-[10px] font-black uppercase tracking-[0.2em]">
                                                 <th className="p-4 pl-8">Asset Name</th>
                                                 <th className="p-4 text-center">Base Price (g)</th>
                                                 <th className="p-4 text-center">Inflation Rate</th>
                                                 <th className="p-4 text-center">Equation Type</th>
+                                                <th className="p-4 text-center">Inflation Start</th>
                                                 <th className="p-4 text-right pr-8">Action</th>
                                             </tr>
                                         </thead>
@@ -1839,12 +1867,16 @@ function AppContent() {
                                                             <option value="flat">Flat (Fixed Price)</option>
                                                         </select>
                                                     </td>
+                                                    <td className="p-4 text-center">
+                                                        <input id={`thr-${item.id}`} type="number" defaultValue={item.inflation_start_threshold || 0} min="0" className="w-16 bg-black/60 border border-white/10 rounded-lg p-2 text-center text-cyan-400 font-mono font-bold outline-none focus:border-blue-500 transition-colors" title="Number of purchases before inflation kicks in" />
+                                                    </td>
                                                     <td className="p-4 text-right pr-8">
                                                         <button disabled={isProcessing} onClick={() => {
                                                             const b = parseInt((document.getElementById(`base-${item.id}`) as HTMLInputElement).value);
                                                             const i = parseInt((document.getElementById(`inf-${item.id}`) as HTMLInputElement).value);
                                                             const t = (document.getElementById(`type-${item.id}`) as HTMLSelectElement).value;
-                                                            handleUpdateItem(item.id, b, i, t);
+                                                            const th = parseInt((document.getElementById(`thr-${item.id}`) as HTMLInputElement).value) || 0;
+                                                            handleUpdateItem(item.id, b, i, t, th);
                                                         }} className="bg-blue-500/10 border border-blue-500/30 text-blue-400 px-5 py-2.5 rounded-lg hover:bg-blue-500 hover:text-white transition-all text-[10px] font-black uppercase tracking-widest shadow-sm active:scale-95 disabled:opacity-50 opacity-0 group-hover:opacity-100">
                                                             Deploy
                                                         </button>
