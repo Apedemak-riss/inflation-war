@@ -122,6 +122,7 @@ const RAW_DATA = [
   { name: "Root Rider", dataId: 4000110, type: 'troop', weight: 20 },
   { name: "Druid", dataId: 4000123, type: 'troop', weight: 16 },
   { name: "Thrower", dataId: 4000132, type: 'troop', weight: 16 },
+  { name: "Furnace", dataId: 4000150, type: 'troop', weight: 18 },
   { name: "Meteor Golem", dataId: 4000177, type: 'troop', weight: 40 },
   { name: "Super Barbarian", dataId: 4000026, type: 'super_troop', weight: 5 },
   { name: "Super Archer", dataId: 4000027, type: 'super_troop', weight: 12 },
@@ -162,6 +163,7 @@ const RAW_DATA = [
 // --- HELPERS ---
 const getImageUrl = (name: string, type: string, hero?: string | null) => {
   if (name === "Meteor Golem") return "/meteor-golem.png";
+  if (name === "Furnace") return "/furnace.png";
   if (name === "Stick Horse") return "/stick-horse.png";
   if (name === "Heroic Torch") return "/heroic-torch.png";
   if (name === "Fire Heart") return "/fire-heart.png";
