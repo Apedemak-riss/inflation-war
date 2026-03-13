@@ -36,16 +36,17 @@ type Item = {
 // --- RAW DATA ---
 const RAW_PETS = [
     { name: "L.A.S.S.I", dataId: 0, type: 'pet', weight: 0 },
-    { name: "Mighty Yak", dataId: 1, type: 'pet', weight: 0 },
     { name: "Electro Owl", dataId: 2, type: 'pet', weight: 0 },
+    { name: "Mighty Yak", dataId: 1, type: 'pet', weight: 0 },
     { name: "Unicorn", dataId: 3, type: 'pet', weight: 0 },
-    { name: "Phoenix", dataId: 4, type: 'pet', weight: 0 },
-    { name: "Poison Lizard", dataId: 7, type: 'pet', weight: 0 },
-    { name: "Diggy", dataId: 8, type: 'pet', weight: 0 },
     { name: "Frosty", dataId: 9, type: 'pet', weight: 0 },
+    { name: "Diggy", dataId: 8, type: 'pet', weight: 0 },
+    { name: "Poison Lizard", dataId: 7, type: 'pet', weight: 0 },
+    { name: "Phoenix", dataId: 4, type: 'pet', weight: 0 },
     { name: "Spirit Fox", dataId: 10, type: 'pet', weight: 0 },
     { name: "Angry Jelly", dataId: 11, type: 'pet', weight: 0 },
     { name: "Sneezy", dataId: 16, type: 'pet', weight: 0 },
+    { name: "Greedy Raven", dataId: 17, type: 'pet', weight: 0 },
 ];
 
 const RAW_DATA = [
@@ -85,6 +86,7 @@ const RAW_DATA = [
   { name: "Metal Pants", dataId: 103, type: 'equipment', hero: 'MP', weight: 0 },
   { name: "Meteor Staff", dataId: 104, type: 'equipment', hero: 'MP', weight: 0 },
   { name: "Noble Iron", dataId: 105, type: 'equipment', hero: 'MP', weight: 0 },
+  // Sieges
   { name: "Wall Wrecker", dataId: 4000051, type: 'siege', weight: 1 },
   { name: "Battle Blimp", dataId: 4000052, type: 'siege', weight: 1 },
   { name: "Stone Slammer", dataId: 4000062, type: 'siege', weight: 1 },
@@ -93,16 +95,27 @@ const RAW_DATA = [
   { name: "Flame Flinger", dataId: 4000091, type: 'siege', weight: 1 },
   { name: "Battle Drill", dataId: 4000092, type: 'siege', weight: 1 },
   { name: "Troop Launcher", dataId: 4000135, type: 'siege', weight: 1 },
+  // Troops — Elixir barracks order
   { name: "Barbarian", dataId: 4000000, type: 'troop', weight: 1 },
   { name: "Archer", dataId: 4000001, type: 'troop', weight: 1 },
-  { name: "Goblin", dataId: 4000002, type: 'troop', weight: 1 },
   { name: "Giant", dataId: 4000003, type: 'troop', weight: 5 },
+  { name: "Goblin", dataId: 4000002, type: 'troop', weight: 1 },
   { name: "Wall Breaker", dataId: 4000004, type: 'troop', weight: 2 },
   { name: "Balloon", dataId: 4000005, type: 'troop', weight: 5 },
   { name: "Wizard", dataId: 4000006, type: 'troop', weight: 4 },
   { name: "Healer", dataId: 4000007, type: 'troop', weight: 14 },
   { name: "Dragon", dataId: 4000008, type: 'troop', weight: 20 },
   { name: "P.E.K.K.A", dataId: 4000009, type: 'troop', weight: 25 },
+  { name: "Baby Dragon", dataId: 4000023, type: 'troop', weight: 10 },
+  { name: "Miner", dataId: 4000024, type: 'troop', weight: 6 },
+  { name: "Electro Dragon", dataId: 4000059, type: 'troop', weight: 30 },
+  { name: "Yeti", dataId: 4000053, type: 'troop', weight: 18 },
+  { name: "Dragon Rider", dataId: 4000065, type: 'troop', weight: 25 },
+  { name: "Electro Titan", dataId: 4000095, type: 'troop', weight: 32 },
+  { name: "Root Rider", dataId: 4000110, type: 'troop', weight: 20 },
+  { name: "Thrower", dataId: 4000132, type: 'troop', weight: 16 },
+  { name: "Meteor Golem", dataId: 4000177, type: 'troop', weight: 40 },
+  // Troops — Dark barracks order
   { name: "Minion", dataId: 4000010, type: 'troop', weight: 2 },
   { name: "Hog Rider", dataId: 4000011, type: 'troop', weight: 5 },
   { name: "Valkyrie", dataId: 4000012, type: 'troop', weight: 8 },
@@ -110,55 +123,54 @@ const RAW_DATA = [
   { name: "Witch", dataId: 4000015, type: 'troop', weight: 12 },
   { name: "Lava Hound", dataId: 4000017, type: 'troop', weight: 30 },
   { name: "Bowler", dataId: 4000022, type: 'troop', weight: 6 },
-  { name: "Baby Dragon", dataId: 4000023, type: 'troop', weight: 10 },
-  { name: "Miner", dataId: 4000024, type: 'troop', weight: 6 },
-  { name: "Yeti", dataId: 4000053, type: 'troop', weight: 18 },
   { name: "Ice Golem", dataId: 4000058, type: 'troop', weight: 15 },
-  { name: "Electro Dragon", dataId: 4000059, type: 'troop', weight: 30 },
-  { name: "Dragon Rider", dataId: 4000065, type: 'troop', weight: 25 },
   { name: "Headhunter", dataId: 4000082, type: 'troop', weight: 6 },
-  { name: "Electro Titan", dataId: 4000095, type: 'troop', weight: 32 },
   { name: "Apprentice Warden", dataId: 4000097, type: 'troop', weight: 20 },
-  { name: "Root Rider", dataId: 4000110, type: 'troop', weight: 20 },
   { name: "Druid", dataId: 4000123, type: 'troop', weight: 16 },
-  { name: "Thrower", dataId: 4000132, type: 'troop', weight: 16 },
   { name: "Furnace", dataId: 4000150, type: 'troop', weight: 18 },
-  { name: "Meteor Golem", dataId: 4000177, type: 'troop', weight: 40 },
+  // Super Troops
   { name: "Super Barbarian", dataId: 4000026, type: 'super_troop', weight: 5 },
   { name: "Super Archer", dataId: 4000027, type: 'super_troop', weight: 12 },
   { name: "Sneaky Goblin", dataId: 4000055, type: 'super_troop', weight: 3 },
-  { name: "Super Giant", dataId: 4000029, type: 'super_troop', weight: 10 },
   { name: "Super Wall Breaker", dataId: 4000028, type: 'super_troop', weight: 8 },
+  { name: "Super Giant", dataId: 4000029, type: 'super_troop', weight: 10 },
   { name: "Rocket Balloon", dataId: 4000057, type: 'super_troop', weight: 8 },
   { name: "Super Wizard", dataId: 4000083, type: 'super_troop', weight: 10 },
   { name: "Super Dragon", dataId: 4000081, type: 'super_troop', weight: 40 },
+  { name: "Inferno Dragon", dataId: 4000063, type: 'super_troop', weight: 15 },
   { name: "Super Minion", dataId: 4000084, type: 'super_troop', weight: 12 },
-  { name: "Super Hog Rider", dataId: 4000098, type: 'super_troop', weight: 12 },
   { name: "Super Valkyrie", dataId: 4000064, type: 'super_troop', weight: 20 },
   { name: "Super Witch", dataId: 4000067, type: 'super_troop', weight: 40 },
   { name: "Ice Hound", dataId: 4000076, type: 'super_troop', weight: 40 },
   { name: "Super Bowler", dataId: 4000080, type: 'super_troop', weight: 30 },
-  { name: "Inferno Dragon", dataId: 4000063, type: 'super_troop', weight: 15 },
   { name: "Super Miner", dataId: 4000056, type: 'super_troop', weight: 24 },
   { name: "Super Yeti", dataId: 4000147, type: 'super_troop', weight: 35 },
+  { name: "Super Hog Rider", dataId: 4000098, type: 'super_troop', weight: 12 },
+  // Spells — Elixir order
   { name: "Lightning Spell", dataId: 26000000, type: 'spell', weight: 1 },
   { name: "Healing Spell", dataId: 26000001, type: 'spell', weight: 2 },
   { name: "Rage Spell", dataId: 26000002, type: 'spell', weight: 2 },
   { name: "Jump Spell", dataId: 26000003, type: 'spell', weight: 2 },
   { name: "Freeze Spell", dataId: 26000005, type: 'spell', weight: 1 },
+  { name: "Clone Spell", dataId: 26000016, type: 'spell', weight: 3 },
+  { name: "Invisibility Spell", dataId: 26000035, type: 'spell', weight: 1 },
+  { name: "Recall Spell", dataId: 26000053, type: 'spell', weight: 2 },
+  { name: "Revive Spell", dataId: 26000098, type: 'spell', weight: 2 },
+  { name: "Totem Spell", dataId: 26000120, type: 'spell', weight: 1 },
+  // Spells — Dark order
   { name: "Poison Spell", dataId: 26000009, type: 'spell', weight: 1 },
   { name: "Earthquake Spell", dataId: 26000010, type: 'spell', weight: 1 },
   { name: "Haste Spell", dataId: 26000011, type: 'spell', weight: 1 },
-  { name: "Clone Spell", dataId: 26000016, type: 'spell', weight: 3 },
   { name: "Skeleton Spell", dataId: 26000017, type: 'spell', weight: 1 },
   { name: "Bat Spell", dataId: 26000028, type: 'spell', weight: 1 },
-  { name: "Invisibility Spell", dataId: 26000035, type: 'spell', weight: 1 },
-  { name: "Recall Spell", dataId: 26000053, type: 'spell', weight: 2 },
   { name: "Overgrowth Spell", dataId: 26000070, type: 'spell', weight: 2 },
-  { name: "Revive Spell", dataId: 26000098, type: 'spell', weight: 2 },
   { name: "Ice Block Spell", dataId: 26000109, type: 'spell', weight: 1 },
-  { name: "Totem Spell", dataId: 26000120, type: 'spell', weight: 1 },
 ];
+
+// Display order map — items sort by their position in RAW_DATA
+const RAW_ORDER: Record<string, number> = {};
+RAW_DATA.forEach((item, idx) => { RAW_ORDER[item.name] = idx; });
+const sortByGameOrder = (items: Item[]) => [...items].sort((a, b) => (RAW_ORDER[a.name] ?? 999) - (RAW_ORDER[b.name] ?? 999));
 
 // --- HELPERS ---
 const getImageUrl = (name: string, type: string, hero?: string | null) => {
@@ -1213,13 +1225,13 @@ function AppContent() {
                         <h5 className="flex items-center gap-2 text-[10px] font-black text-orange-400 uppercase tracking-widest bg-orange-950/20 p-2 rounded border border-orange-500/10">
                             <Sword size={12}/> Troops <span className="ml-auto opacity-50">Max 55</span>
                         </h5>
-                        {renderMiniGrid(dbItems.filter(i => i.type === 'troop' || i.type === 'super_troop'))}
+                        {renderMiniGrid(sortByGameOrder(dbItems.filter(i => i.type === 'troop' || i.type === 'super_troop')))}
                     </div>
                     <div className="space-y-4">
                         <h5 className="flex items-center gap-2 text-[10px] font-black text-orange-400 uppercase tracking-widest bg-orange-950/20 p-2 rounded border border-orange-500/10">
                             <Hexagon size={12}/> Spells <span className="ml-auto opacity-50">Max 4</span>
                         </h5>
-                        {renderMiniGrid(dbItems.filter(i => i.type === 'spell'))}
+                        {renderMiniGrid(sortByGameOrder(dbItems.filter(i => i.type === 'spell')))}
                     </div>
                 </div>
           </div>
@@ -1831,7 +1843,7 @@ function AppContent() {
                             { title: 'SIEGES', types: ['siege'] },
                             { title: 'PETS', types: ['pet'] }
                         ].map(category => {
-                            const catItems = dbItems.filter(i => category.types.includes(i.type));
+                            const catItems = sortByGameOrder(dbItems.filter(i => category.types.includes(i.type)));
                             if (catItems.length === 0) return null;
                             return (
                                 <div key={category.title} className="mb-8 bg-[#0a101f]/80 rounded-2xl border border-white/5 shadow-inner overflow-hidden">
@@ -2052,7 +2064,7 @@ function AppContent() {
                 </div>
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 lg:gap-10">
                     {['BK','AQ','GW','RC','MP','DD'].map(h => {  
-                        const hItems = dbItems.filter(i => i.hero === h); 
+                        const hItems = sortByGameOrder(dbItems.filter(i => i.hero === h)); 
                         if (hItems.length === 0) return null; 
                         return (
                             <div key={h} className="glass rounded-[2rem] p-8 border border-white/5 hover:border-yellow-500/30 transition-all group bg-black/20 hover:bg-black/40">
@@ -2084,7 +2096,7 @@ function AppContent() {
                         <p className="text-green-500/40 text-[10px] lg:text-sm tracking-[0.3em] uppercase font-bold mt-1 lg:mt-2">Tactical Pet Support</p>
                     </div>
                 </div>
-                <div className="glass p-4 lg:p-10 rounded-[1.5rem] lg:rounded-[2.5rem] border border-white/5 bg-black/20 shadow-inner">{renderGrid(dbItems.filter(i => i.type === 'pet'))}</div>
+                <div className="glass p-4 lg:p-10 rounded-[1.5rem] lg:rounded-[2.5rem] border border-white/5 bg-black/20 shadow-inner">{renderGrid(sortByGameOrder(dbItems.filter(i => i.type === 'pet')))}</div>
             </section>
 
             {renderCCShop()}
@@ -2098,7 +2110,7 @@ function AppContent() {
                         </div>
                         <h2 className="text-3xl lg:text-4xl font-black tracking-tighter text-blue-100">TROOPS</h2>
                     </div>
-                    {renderGrid(dbItems.filter(i => i.type === 'troop' || i.type === 'super_troop'))}
+                    {renderGrid(sortByGameOrder(dbItems.filter(i => i.type === 'troop' || i.type === 'super_troop')))}
                 </section>
                 
                 <div className="space-y-8 lg:space-y-16">
@@ -2110,7 +2122,7 @@ function AppContent() {
                             </div>
                             <h2 className="text-3xl lg:text-4xl font-black tracking-tighter text-orange-100">SIEGES</h2>
                         </div>
-                        {renderGrid(dbItems.filter(i => i.type === 'siege'))}
+                        {renderGrid(sortByGameOrder(dbItems.filter(i => i.type === 'siege')))}
                     </section>
                     
                     <section className="relative">
@@ -2121,7 +2133,7 @@ function AppContent() {
                             </div>
                             <h2 className="text-3xl lg:text-4xl font-black tracking-tighter text-purple-100">SPELLS</h2>
                         </div>
-                        {renderGrid(dbItems.filter(i => i.type === 'spell'))}
+                        {renderGrid(sortByGameOrder(dbItems.filter(i => i.type === 'spell')))}
                     </section>
                 </div>
             </div>
