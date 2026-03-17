@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { createTournament, registerParticipant } from '../services/challongeService';
 import toast from 'react-hot-toast';
+import { isSafeUrl } from '../lib/sanitize';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 export const TournamentHub: React.FC = () => {
@@ -367,10 +368,10 @@ export const TournamentHub: React.FC = () => {
                                                     )}
                                                     {t.registration_url && (
                                                         <a 
-                                                            href={t.registration_url}
+                                                            href={isSafeUrl(t.registration_url) ? t.registration_url : '#'}
                                                             target="_blank"
                                                             rel="noopener noreferrer"
-                                                            onClick={(e) => e.stopPropagation()}
+                                                            onClick={(e) => { if (!isSafeUrl(t.registration_url)) e.preventDefault(); e.stopPropagation(); }}
                                                             className="text-xs bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg font-bold tracking-wider transition-colors"
                                                         >
                                                             INFO

@@ -14,6 +14,7 @@ import { TournamentView } from './components/TournamentView';
 import { Shield, Sword, Coins, ExternalLink, Hammer, Crown, Minus, Check, Users, RefreshCw, Trash2, Trophy, ArrowRightLeft, LogOut, Gavel, MonitorPlay, ClipboardCheck, AlertTriangle, Loader2, Edit2, Save, X, Tv, PawPrint, Castle, Terminal, Wifi, Lock, Zap, Skull, Hexagon, Crosshair, Settings, ArrowRight, ChevronRight, ArrowLeft } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 import { confirmToast } from './utils/confirmToast';
+import { isSafeUrl } from './lib/sanitize';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -877,7 +878,7 @@ function AppContent() {
     if (isLocked) {
          if(playerId) {
              const { data } = await supabase.from('players').select('army_link').eq('id', playerId).single();
-             if (data?.army_link) window.open(data.army_link, '_blank');
+             if (data?.army_link && isSafeUrl(data.army_link)) window.open(data.army_link, '_blank');
          }
          return;
     }
@@ -1734,7 +1735,7 @@ function AppContent() {
                                         </div>
                                         <div className="flex items-center gap-2">
                                             {p.army_link && (
-                                                <a href={p.army_link} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="bg-yellow-500/10 hover:bg-yellow-500/30 text-yellow-400 border border-yellow-500/30 p-2 rounded-lg transition-all hover:scale-110 active:scale-95" title="Open Army Link">
+                                                <a href={isSafeUrl(p.army_link) ? p.army_link : '#'} target="_blank" rel="noopener noreferrer" onClick={e => { if (!isSafeUrl(p.army_link)) e.preventDefault(); e.stopPropagation(); }} className="bg-yellow-500/10 hover:bg-yellow-500/30 text-yellow-400 border border-yellow-500/30 p-2 rounded-lg transition-all hover:scale-110 active:scale-95" title="Open Army Link">
                                                     <ExternalLink size={14}/>
                                                 </a>
                                             )}
@@ -1942,7 +1943,7 @@ function AppContent() {
                                             </div>
                                             <span className="font-black text-2xl tracking-tight text-slate-200 group-hover/player:text-white transition-colors">{p.name}</span>
                                             {p.army_link && (
-                                                <a href={p.army_link} target="_blank" rel="noopener noreferrer" className="ml-2 bg-yellow-500/10 hover:bg-yellow-500/30 text-yellow-400 border border-yellow-500/30 text-[9px] font-black px-3 py-1.5 rounded-lg flex items-center gap-2 transition-all uppercase tracking-widest hover:scale-105 active:scale-95">
+                                                <a href={isSafeUrl(p.army_link) ? p.army_link : '#'} target="_blank" rel="noopener noreferrer" onClick={e => { if (!isSafeUrl(p.army_link)) e.preventDefault(); }} className="ml-2 bg-yellow-500/10 hover:bg-yellow-500/30 text-yellow-400 border border-yellow-500/30 text-[9px] font-black px-3 py-1.5 rounded-lg flex items-center gap-2 transition-all uppercase tracking-widest hover:scale-105 active:scale-95">
                                                     <ExternalLink size={10}/> Link
                                                 </a>
                                             )}

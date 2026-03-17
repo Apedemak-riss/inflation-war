@@ -3,6 +3,7 @@ import { RefreshCw, LayoutList, Trophy, Swords } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { fetchParticipants, fetchOpenMatches, fetchTournamentDetails } from '../services/challongeService'; 
 import toast from 'react-hot-toast';
+import { isSafeTournamentSlug } from '../lib/sanitize';
 import { transformChallongeData } from '../utils/bracketTransforms';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -748,7 +749,8 @@ export const CustomBracket: React.FC<CustomBracketProps> = ({ tournamentUrl, isM
         // ============================================
         // SE / DE — Challonge Embedded Iframe + Match List
         // ============================================
-        const challongeEmbedUrl = `https://challonge.com/${tournamentUrl}/module?theme=2&show_final_results=1`;
+        const safeTournamentUrl = isSafeTournamentSlug(tournamentUrl) ? tournamentUrl : '';
+        const challongeEmbedUrl = `https://challonge.com/${safeTournamentUrl}/module?theme=2&show_final_results=1`;
 
         const creatableIds = getCreatableMatchIds(matches);
 
