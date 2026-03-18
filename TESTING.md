@@ -2,8 +2,8 @@
 
 This application manages complex PostgreSQL states alongside heavily nested React components to power 5v5 Clash of Clans tournaments. Testing should verify both frontend and backend edge cases.
 
-## Known Vulnerabilities
-A security audit in March 2026 revealed issues with RLS and the `challonge-proxy` SSRF surface. See `SECURITY.md` for details. Security unit tests **must** be implemented to confirm that RLS and Edge Function Auth bindings cannot be bypassed once they are patched.
+## Security Testing
+RLS policies, RPC authorization checks, and edge function endpoint validation should be verified after any database schema changes. See `SECURITY.md` for the security architecture that tests should validate.
 
 ## 1. Unit Tests (Frontend)
 

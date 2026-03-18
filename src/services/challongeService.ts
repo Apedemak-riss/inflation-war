@@ -98,8 +98,7 @@ export const reportMatchScore = async (
         }
     });
 
-    console.log('[API_DEBUG_CHALLONGE] reportMatchScore Payload:', JSON.stringify(payload, null, 2));
-    console.log('[API_DEBUG_CHALLONGE] reportMatchScore Response:', { data, error });
+
 
     if (error) {
         throw new Error(`Edge Function Error Updating Match: ${error.message}`);
@@ -168,7 +167,7 @@ export const createTournament = async (tournamentData: { name: string, url: stri
     // 2. Via the Advanced Options modal (PUT update after creation)
     // 3. Via the moderator panel in TournamentView before starting
 
-    console.log('[Challonge] createTournament payload:', JSON.stringify(payload, null, 2));
+
 
     const { data: responseData, error } = await supabase.functions.invoke('challonge-proxy', {
         body: { 
@@ -178,12 +177,7 @@ export const createTournament = async (tournamentData: { name: string, url: stri
         }
     });
 
-    // Log the FULL response to see if group_stage_enabled was accepted
-    console.log('[Challonge] createTournament FULL response:', JSON.stringify(responseData, null, 2));
-    if (responseData?.data?.attributes) {
-        console.log('[Challonge] group_stage_enabled in response:', responseData.data.attributes.group_stage_enabled);
-        console.log('[Challonge] group_stage_options in response:', JSON.stringify(responseData.data.attributes.group_stage_options));
-    }
+
 
     if (error) {
         // Because Supabase Client intercepts HTTP 4xx/5xx and scrubs the payload,
@@ -360,7 +354,7 @@ export const toggleGroupStage = async (
         }
     };
 
-    console.log('[Challonge] toggleGroupStage payload:', JSON.stringify(payload, null, 2));
+
 
     const { data: responseData, error } = await supabase.functions.invoke('challonge-proxy', {
         body: { 
@@ -370,7 +364,7 @@ export const toggleGroupStage = async (
         }
     });
 
-    console.log('[Challonge] toggleGroupStage response:', responseData);
+
 
     if (error) {
         throw new Error(error.message || "Failed to toggle group stage on Challonge.");

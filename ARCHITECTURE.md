@@ -119,34 +119,44 @@ players
 ├── id (UUID, PK)
 ├── lobby_id (UUID, FK)
 ├── roster_id (UUID, FK)
+├── user_id (UUID, FK → auth.users)
 ├── name (TEXT)
 ├── is_locked (BOOLEAN)
 └── army_link (TEXT)
 
-equipment_selections
+purchases
 ├── id (UUID, PK)
 ├── player_id (UUID, FK)
-├── hero_name (TEXT)
-└── equipment_id (TEXT)
+├── team_id (UUID, FK)
+├── item_id (TEXT, FK)
+├── price_paid (INTEGER)
+├── equipped_hero (TEXT)
+└── is_cc (BOOLEAN)
 ```
 
 ### PostgreSQL Functions (RPCs)
-We rely heavily on Remote Procedure Calls to perform secure server-side logic:
+We rely heavily on Remote Procedure Calls (SECURITY DEFINER with explicit `search_path`) to perform secure server-side logic:
 - `create_lobby`: Spools up the entire database row structure for a 5v5 matchup atomically.
-- `end_match_secure`: Submits the final match scores directly to Challonge using the Edge Function and closes the lobby.
-- `lock_player_army`: Validates that a player is adhering to equipment rules before finalizing their loadout.
+- `end_match_secure`: Archives match data and closes the lobby (moderator-authorized).
+- `lock_player_army`: Validates player ownership before finalizing their loadout.
+- `buy_item` / `sell_item`: Handle economy transactions with caller ownership verification.
+- All player-facing RPCs verify `auth.uid()` matches the player's `user_id`. Moderator RPCs enforce role authorization.
 
 ### Edge Function: `challonge-proxy`
 
 **Location:** `/supabase/functions/challonge-proxy/index.ts`
 
-**Responsibility:** Securely injects the backend `CHALLONGE_API_KEY` into requests to prevent client-side leakage.
+**Responsibility:** Securely proxies requests to the Challonge API, keeping the `CHALLONGE_API_KEY` server-side.
+
+**Security:**
+- Requires a valid JWT (`verify_jwt: true`) — unauthenticated requests are rejected.
+- Validates the `endpoint` parameter against a strict allowlist pattern before forwarding.
 
 **Flow:**
-1. Receives POST from client with `endpoint` (e.g., `/tournaments/123/matches`), `method`, and `body`.
-2. Appends the `CHALLONGE_API_KEY` to the headers.
-3. Automatically routes to `v2.1` or `v1` Challonge API depending on the prefix.
-4. Returns the raw JSON API response to the React client.
+1. Receives POST from client with `endpoint`, `method`, and `body`.
+2. Validates the endpoint against the allowlist.
+3. Appends the `CHALLONGE_API_KEY` and forwards to the Challonge API.
+4. Returns the JSON response to the React client.
 
 ### Real-Time Subscriptions
 Supabase Realtime provides instant feedback across the app:
@@ -155,11 +165,12 @@ Supabase Realtime provides instant feedback across the app:
 
 ---
 
-## Security Audit Status (March 2026)
+## Security Architecture
 
-A recent audit noted several needed architectural upgrades:
-1. **SSRF Proxy Vulnerability:** The `challonge-proxy` Edge Function currently accepts any endpoint payload without Supabase Auth validation. It is currently being upgraded to feature role-based authentication and endpoint whitelisting.
-2. **RLS Configuration:** The initial prototype leaned on `USING (true)` for specific tables. Architecture is actively switching to strict `auth.uid() = user_id` ownership parity.
-3. **Database Function Mutation:** Supabase identified role-mutable `search_path` attributes across the application's RPCs (`lock_player_army`, `end_match_secure`, etc.). These are scheduled to have `SET search_path = public` prepended to prevent hijacking.
+The application implements defense-in-depth security:
+- **RLS Policies:** Every table has explicit Row Level Security policies enforcing ownership and role constraints.
+- **RPC Authorization:** All RPCs use `SECURITY DEFINER` with `SET search_path TO 'public'` and include caller authorization checks.
+- **Edge Function:** JWT-authenticated with endpoint validation.
+- **Client-Side:** URL sanitization guards and XSS prevention.
 
-See `SECURITY.md` for full implementation status regarding these architectural changes.
+See `SECURITY.md` for the full security architecture documentation.

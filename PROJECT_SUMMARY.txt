@@ -3,10 +3,10 @@ Clash of Clans 5v5 Tournament Manager
 This application is a real-time web dashboard designed for coordinating, scoring, and organizing massive 5v5 Clash of Clans Tournaments. It natively hooks into the Challonge API to dynamically pull bracket progressions, Group Stages, and final Single-Elimination and Double-Elimination brackets.
 
 Key Features:
-- Direct Challonge integration via `challonge-proxy` edge function.
+- Direct Challonge integration via a secure edge function proxy with JWT authentication and endpoint validation.
 - Support for complex Double Stage (Group Stage into Elimination Bracket) formats with dynamic "CREATE LOBBY" and "JOIN LOBBY" action buttons.
 - Match Lobbies where teams collaborate to assign and track Hero Equipment loadouts before deploying to battle.
-- In-built Clash of Clans Army deep-link generation (`clashofclans://action=CopyArmy`) to quickly launch loadouts from the browser.
+- In-built Clash of Clans Army deep-link generation (clashofclans://action=CopyArmy) to quickly launch loadouts from the browser.
 - Strict PostgreSQL state management handling 10-player rooms atomically, restricting edits once players 'lock' their configuration.
 
 Core Stack:
@@ -15,4 +15,4 @@ Core Stack:
 - API integration: Standard JSON:API over external REST.
 
 Security Posture:
-A major audit (March 2026) revealed that while the `challonge-proxy` successfully obfuscates API keys from being leaked in client JavaScript, the proxy is completely unauthenticated and thus vulnerable to SSRF attacks if called externally. Furthermore, several key tables feature completely un-gated `USING (true)` Row Level Security (RLS) policies which are queued to be tightened. See `SECURITY.md` for historical and active remediation steps.
+The application implements defense-in-depth security with Row Level Security (RLS) policies enforcing ownership and role constraints, SECURITY DEFINER RPCs with caller authorization, JWT-authenticated edge functions with endpoint allowlists, and client-side URL sanitization. See SECURITY.md for the full security architecture.

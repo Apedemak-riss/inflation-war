@@ -39,14 +39,14 @@ supabase login
 supabase link --project-ref your_project_ref
 
 # Deploy all Edge Functions (challonge-proxy)
-supabase functions deploy --no-verify-jwt
+supabase functions deploy
 
 # Set Secrets for the Edge Function
 supabase secrets set CHALLONGE_API_KEY=your_challonge_v1_or_v2_api_key
 ```
 
-**Security Warning**: 
-Our auditing process identified vulnerabilities in RLS and Edge Function SSRF. Please review `SECURITY.md` for mitigation strategies. Do **NOT** expose `CHALLONGE_API_KEY` on your `.env` frontend environment. It must strictly live inside Supabase Secrets for the edge function.
+**Security Note**: 
+The `challonge-proxy` edge function requires JWT authentication and validates endpoint paths against an allowlist. Do **NOT** expose `CHALLONGE_API_KEY` in your `.env` frontend environment. It must strictly live inside Supabase Secrets for the edge function. See `SECURITY.md` for the full security architecture.
 
 ## 3. Frontend Deployment (Vercel)
 

@@ -24,21 +24,21 @@ This document tracks the delivered components of the Clash of Clans 5v5 Tourname
 
 ## Backend Infrastructure
 
-1. **Real-Time PostgreSQL**
-   - Supabase project handling `lobbies`, `players`, `teams`, `tournaments` and `equipment_selections`.
-   - RPCs (Remote Procedure Calls) handling complex atomicity such as `create_lobby` and `end_match_secure`.
+1.  **Real-Time PostgreSQL**
+    -   Supabase project handling `lobbies`, `players`, `teams`, `tournaments` and `equipment_selections`.
+    -   RPCs (Remote Procedure Calls) handling complex atomicity such as `create_lobby` and `end_match_secure`.
 
-2. **Serverless Edge Functions**
-   - `challonge-proxy`: Injects `CHALLONGE_API_KEY` to protect credentials from the React frontend.
-   - (Note: Pending Security Updates per the Security Audit - see `SECURITY.md`).
+2.  **Serverless Edge Functions**
+    -   `challonge-proxy`: JWT-authenticated proxy that securely injects `CHALLONGE_API_KEY` with endpoint validation.
 
 ## Documentation Suite
 
-1. **`ARCHITECTURE.md`** - Overview of React frontend, GameContext, and Supabase interaction.
-2. **`SECURITY.md`** - Details the RLS model, RPC search path vulnerabilities, and SSRF proxy findings.
-3. **`DEPLOYMENT.md`** - Instructions for publishing the Vite frontend and Edge Functions.
-4. **`TESTING.md`** - Guide for verifying Challonge sync, Lobby behavior, and DB constraints.
-5. **`QUICKSTART.md`** - Developer onboarding manual.
+1.  **`ARCHITECTURE.md`** - Overview of React frontend, GameContext, and Supabase interaction.
+2.  **`SECURITY.md`** - Security architecture documentation covering RLS, RPC authorization, and edge function protections.
+3.  **`DEPLOYMENT.md`** - Instructions for publishing the Vite frontend and Edge Functions.
+4.  **`TESTING.md`** - Guide for verifying Challonge sync, Lobby behavior, and DB constraints.
+5.  **`QUICKSTART.md`** - Developer onboarding manual.
 
-## Security Audit (Delivered March 2026)
-- **SECURITY_AUDIT_REPORT.md**: Comprehensive internal audit of the application identifying RLS misconfigurations, Edge Function proxy SSRF vulnerabilities, and PostgreSQL `search_path` mutation risks.
+## Security Hardening (March 2026)
+- Comprehensive security audit completed and all identified items remediated.
+- RLS policies, RPC authorization, edge function validation, and client-side XSS protections implemented.
