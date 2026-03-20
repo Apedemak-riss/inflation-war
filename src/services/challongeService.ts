@@ -185,8 +185,14 @@ export const createTournament = async (tournamentData: { name: string, url: stri
         if (error.context && error.context.errors) {
              throw new Error(`Challonge Validation Error: ${JSON.stringify(error.context.errors)}`);
         }
-        if (error.message.includes('non-2xx')) {
-            throw new Error(`Challonge rejected the request. Status 422. Please verify the URL is not taken and options are valid. Subtype block missing?`);
+        if (error.message && error.message.includes('non-2xx')) {
+            const status = error.context?.status || 'Unknown';
+            if (status === 422 || status === '422') {
+                throw new Error(`Challonge rejected the request. Status 422. Please verify the URL is not taken and options are valid.`);
+            } else if (status === 401 || status === '401') {
+                throw new Error(`Edge Function returned 401 Unauthorized. The CHALLONGE_API_KEY secret in Supabase may be invalid or expired.`);
+            }
+            throw new Error(`Edge Function Error (Status ${status}): Challonge proxy request failed.`);
         }
         throw new Error(error.message || "Failed to initialize tournament on Challonge.");
     }

@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -10,6 +11,29 @@ Deno.serve(async (req: Request) => {
     // 1. Handle CORS preflight requests
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders });
+    }
+
+    // 1.5. Manually verify JWT to secure the proxy (since API Gateway verify_jwt has issues)
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+        return new Response(JSON.stringify({ error: 'Unauthorized: Missing Authorization header' }), {
+            status: 401,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+    }
+
+    const supabaseClient = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+        { global: { headers: { Authorization: authHeader } } }
+    );
+
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) {
+        return new Response(JSON.stringify({ error: 'Unauthorized: Invalid user session' }), {
+            status: 401,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
     }
 
     try {
@@ -24,7 +48,8 @@ Deno.serve(async (req: Request) => {
         }
 
         // 3. Inject Challonge API Key from Supabase Secrets Securely
-        const apiKey = Deno.env.get('CHALLONGE_API_KEY');
+        const apiKeyRaw = Deno.env.get('CHALLONGE_API_KEY');
+        const apiKey = apiKeyRaw ? apiKeyRaw.trim() : null;
         if (!apiKey) {
             return new Response(JSON.stringify({ error: 'Missing CHALLONGE_API_KEY secret in Supabase' }), {
                 status: 500,

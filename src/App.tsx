@@ -17,6 +17,7 @@ import { confirmToast } from './utils/confirmToast';
 import { isSafeUrl } from './lib/sanitize';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
+import { TeamArmyPanel } from './components/TeamArmyPanel';
 
 // --- TYPES ---
 const HERO_LINK_IDS: Record<string, number> = { BK: 0, AQ: 1, GW: 2, RC: 4, MP: 6, DD: 7 };
@@ -280,7 +281,7 @@ function AppContent() {
   const [participantToRosterMap, setParticipantToRosterMap] = useState<Record<string, string>>({});
   const [challongeParticipantMap, setChallongeParticipantMap] = useState<Record<string, string>>({}); // Restored back for fallback display name resolution
 
-  const [teamBudget, setTeamBudget] = useState(100);
+  const [teamBudget, setTeamBudget] = useState(1000);
   const [dbItems, setDbItems] = useState<Item[]>([]);
   const [teamPurchases, setTeamPurchases] = useState<any[]>([]);
   const [myPurchases, setMyPurchases] = useState<any[]>([]);
@@ -298,6 +299,7 @@ function AppContent() {
   // End Match Tracking
   const [showEndMatchModal, setShowEndMatchModal] = useState(false);
   const [endMatchScores, setEndMatchScores] = useState<Record<string, { stars: string, percentage: string }>>({});
+  const [showTeamPanel, setShowTeamPanel] = useState(false);
 
   const [showSandbox, setShowSandbox] = useState(false);
   const [poppingItem, setPoppingItem] = useState<string | null>(null);
@@ -320,7 +322,13 @@ function AppContent() {
   };
 
   // --- INIT ---
-  useEffect(() => { checkDatabase(); attemptRestoreSession(); }, []);
+  useEffect(() => { checkDatabase(); }, []);
+
+  useEffect(() => {
+      if (!loading) {
+          attemptRestoreSession();
+      }
+  }, [loading]);
 
   useEffect(() => {
      if (user) {
@@ -419,6 +427,11 @@ function AppContent() {
     if (data) setDbItems(data);
   };
 
+  const fetchTeams = async (lId: string) => {
+    const { data: teams } = await supabase.from('teams').select('*, players(id, name, army_link, is_locked, purchases(item_id, equipped_hero, is_cc))').eq('lobby_id', lId).order('created_at', { ascending: true });
+    if (teams) setLobbyTeams(teams);
+  };
+
   const attemptRestoreSession = async () => {
       const storedPid = localStorage.getItem('iw_pid');
       const storedTid = localStorage.getItem('iw_tid');
@@ -428,15 +441,10 @@ function AppContent() {
           if (player && player.team_id === storedTid) {
               setPlayerId(player.id); setTeamId(player.team_id); setPlayerName(player.name); setLobbyCode(storedLobby); setIsLocked(player.is_locked || false);
               const { data: lobby } = await supabase.from('lobbies').select('*').eq('code', storedLobby).single();
-              if (lobby) { setFoundLobby(lobby); const { data: team } = await supabase.from('teams').select('name').eq('id', storedTid).single(); setTeamName(team?.name || ''); navigate('/game'); }
+              if (lobby) { setFoundLobby(lobby); const { data: team } = await supabase.from('teams').select('name').eq('id', storedTid).single(); setTeamName(team?.name || ''); fetchTeams(lobby.id); navigate('/game'); }
           }
       }
       setIsRestoring(false);
-  };
-
-  const fetchTeams = async (lId: string) => {
-    const { data: teams } = await supabase.from('teams').select('*, players(id, name, army_link, is_locked, purchases(item_id, equipped_hero, is_cc))').eq('lobby_id', lId).order('created_at', { ascending: true });
-    if (teams) setLobbyTeams(teams);
   };
 
   useEffect(() => {
@@ -479,7 +487,7 @@ function AppContent() {
       let { data: lobby } = await withTimeout<any>(supabase.from('lobbies').select('*').eq('code', code).single());
       if (mode === '/moderator' && !lobby) {
          const { data: nl } = await withTimeout<any>(supabase.from('lobbies').insert({ code }).select().single());
-         lobby = nl; await withTimeout(supabase.from('teams').insert([{ lobby_id: nl.id, name: 'Team 1', budget: 100 }, { lobby_id: nl.id, name: 'Team 2', budget: 100 }]));
+         lobby = nl; await withTimeout(supabase.from('teams').insert([{ lobby_id: nl.id, name: 'Team 1', budget: 1000 }, { lobby_id: nl.id, name: 'Team 2', budget: 1000 }]));
       } else if (!lobby) { setLoading(false); toast.error('Lobby not found.'); return; }
       setFoundLobby(lobby); 
       fetchTeams(lobby.id); 
@@ -690,7 +698,9 @@ function AppContent() {
     localStorage.setItem('iw_lobby', lobbyCode);
 
     localStorage.setItem('iw_lobby', lobbyCode);
-    setPlayerId(p.id); setTeamId(tIdData!.id); setTeamName(tName); navigate('/game');
+    setPlayerId(p.id); setTeamId(tIdData!.id); setTeamName(tName);
+    if (foundLobby) await fetchTeams(foundLobby.id);
+    navigate('/game');
   };
 
   // --- REALTIME ---
@@ -701,16 +711,27 @@ function AppContent() {
       const ch = supabase.channel(`game-${teamId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'teams', filter: `id=eq.${teamId}` }, p => { if(p.new && (p.new as any).budget !== undefined) setTeamBudget((p.new as any).budget); })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'purchases', filter: `team_id=eq.${teamId}` }, () => fetchGameState())
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'players', filter: `id=eq.${playerId}` }, async (payload) => {
-            if (payload.new && payload.new.team_id !== teamId) {
-                console.log('[Realtime] Player moved to new team:', payload.new.team_id);
-                toast('Moved to new team. Army reset.', { icon: '🔄' });
-                const newTid = payload.new.team_id;
-                localStorage.setItem('iw_tid', newTid);
-                const { data: t } = await supabase.from('teams').select('name').eq('id', newTid).single();
-                setTeamId(newTid); setTeamName(t?.name || ''); setMyPurchases([]); setTeamPurchases([]);
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'players', filter: `team_id=eq.${teamId}` }, async (payload) => { 
+            // 1. Handle logic for ALL players in the team (someone joined, left, bought stuff, toggled lock)
+            if (foundLobby) await fetchTeams(foundLobby.id);
+            else if (lobbyCode) {
+                 const { data: L } = await supabase.from('lobbies').select('id').eq('code', lobbyCode).single();
+                 if (L) await fetchTeams(L.id);
             }
-            if (payload.new && payload.new.is_locked !== undefined) setIsLocked(payload.new.is_locked);
+            
+            // 2. Handle specific logic if the update applies to THIS current player
+            if (payload.new && (payload.new as any).id === playerId) {
+                 const pl = payload.new as any;
+                 if (pl.team_id !== teamId) {
+                     console.log('[Realtime] Player moved to new team:', pl.team_id);
+                     toast('Moved to new team. Army reset.', { icon: '🔄' });
+                     const newTid = pl.team_id;
+                     localStorage.setItem('iw_tid', newTid);
+                     const { data: t } = await supabase.from('teams').select('name').eq('id', newTid).single();
+                     setTeamId(newTid); setTeamName(t?.name || ''); setMyPurchases([]); setTeamPurchases([]);
+                 }
+                 if (pl.is_locked !== undefined) setIsLocked(pl.is_locked);
+            }
         })
         .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'teams', filter: `id=eq.${teamId}` }, () => {
              toast.error('Team disbanded by moderator.');
@@ -763,6 +784,18 @@ function AppContent() {
         if (!activeH.has(targetHero || item.hero) && activeH.size >= 4) { toast.error('4 Heroes Max'); return; }
     }
     if (item.type === 'pet' && !targetHero && !isCC) { setPetModalItem(item); return; }
+    
+    if (!isCC && item.type === 'super_troop') {
+        const ownedSuperTroopTypes = new Set(
+            myPurchases
+              .filter(p => !p.is_cc && dbItems.find(i => i.id === p.item_id)?.type === 'super_troop')
+              .map(p => p.item_id)
+        );
+        if (!ownedSuperTroopTypes.has(item.id) && ownedSuperTroopTypes.size >= 2) {
+            toast.error('Max 2 types of Super Troops per army!');
+            return;
+        }
+    }
     
     const count = teamPurchases.filter(x => x.item_id === item.id && !x.is_cc).length;
     const threshold = item.inflation_start_threshold || 0;
@@ -875,15 +908,7 @@ function AppContent() {
   };
 
   const exportArmy = async () => {
-    if (isLocked) {
-         if(playerId) {
-             const { data } = await supabase.from('players').select('army_link').eq('id', playerId).single();
-             if (data?.army_link && isSafeUrl(data.army_link)) window.open(data.army_link, '_blank');
-         }
-         return;
-    }
-    if (!(await confirmToast('CONFIRM DEPLOYMENT?\n\nThis will LOCK your army and prevent further changes.'))) return;
-
+    // 1. Calculate the link synchronously so it's always available
     const getItem = (id: string) => dbItems.find(i => i.id === id);
     const gen = (list: any[], types: string[]) => {
         const rel = list.map(p => getItem(p.item_id)).filter(i => i && types.includes(i.type)) as Item[];
@@ -908,17 +933,42 @@ function AppContent() {
     const sStr = gen(main, ['spell']);
     const mainStr = (uStr ? 'u' + uStr : '') + (sStr ? 's' + sStr : '');
     
-    const link = hStr + ccStr + mainStr;
-    const url = `https://link.clashofclans.com/en?action=CopyArmy&army=${link}`;
+    const calculatedLink = hStr + ccStr + mainStr;
+    const url = `https://link.clashofclans.com/en?action=CopyArmy&army=${calculatedLink}`;
+
+    // 2. If already locked, open the window SYNCHRONOUSLY to bypass mobile popup blockers
+    if (isLocked) {
+        const currentPlayer = lobbyTeams.flatMap(t => t.players || []).find(p => p.id === playerId);
+        const linkToOpen = currentPlayer?.army_link || url;
+        if (linkToOpen && isSafeUrl(linkToOpen)) {
+            window.open(linkToOpen, '_blank');
+        } else {
+            window.open(url, '_blank');
+        }
+        return;
+    }
+
+    // 3. Otherwise, do the locking flow (this is async, so the final window.open might be blocked depending on the browser/device)
+    if (!(await confirmToast('CONFIRM DEPLOYMENT?\n\nThis will LOCK your army and prevent further changes.'))) return;
     
     if (playerId) {
         setIsProcessing(true);
         const { error } = await supabase.rpc('lock_player_army', { p_player_id: playerId, p_army_link: url });
-        if (error) toast.error('Error locking army: ' + error.message);
-        else setIsLocked(true);
         setIsProcessing(false);
+        if (error) {
+            toast.error('Error locking army: ' + error.message);
+            return;
+        }
+        setIsLocked(true);
+        toast.success("Army Locked! If it didn't open automatically, tap the 'OPEN ARMY LINK' button.");
     }
-    window.open(url, '_blank');
+
+    // Try to open it. If it gets blocked, the user is safe because the button is now "OPEN ARMY LINK" (which works sync).
+    try {
+        window.open(url, '_blank');
+    } catch (e) {
+        console.warn("Popup blocked automatically opening the link.");
+    }
   };
 
   // --- HELPERS FOR UI ---
@@ -1148,9 +1198,14 @@ function AppContent() {
     await supabase.from('players').update({ team_id: other.id }).eq('id', pId); 
     fetchTeams(foundLobby.id); 
   };
-  const handleKick = async (pId: string) => { if(!(await confirmToast('Kick player?'))) return; await supabase.from('players').delete().eq('id', pId); fetchTeams(foundLobby.id); };
+  const handleKick = async (pId: string) => { 
+      if(!(await confirmToast('Kick player?'))) return; 
+      await supabase.rpc('clear_player_army', { p_player_id: pId });
+      await supabase.from('players').delete().eq('id', pId); 
+      fetchTeams(foundLobby.id); 
+  };
   const handleReset = async (tId: string) => { 
-      if(!(await confirmToast('Initiate Protocol: Purge & Reset? This will delete all team purchases and restore the budget to 100g.'))) return;
+      if(!(await confirmToast('Initiate Protocol: Purge & Reset? This will delete all team purchases and restore the budget to 1000g.'))) return;
       await supabase.rpc('moderator_reset_team', { p_team_id: tId }); 
       fetchTeams(foundLobby.id); 
   };
@@ -1619,15 +1674,15 @@ function AppContent() {
             
             {refResult !== null && (
                 <div className="mt-10 glass rounded-2xl overflow-hidden border border-white/10 shadow-2xl animate-slide-up relative z-10">
-                    <div className={`text-center p-8 border-b border-white/5 relative overflow-hidden ${refResult > 100 ? 'bg-red-950/50' : 'bg-green-950/50'}`}>
-                        <div className={`absolute inset-0 blur-3xl opacity-20 ${refResult > 100 ? 'bg-red-500' : 'bg-green-500'}`}></div>
+                    <div className={`text-center p-8 border-b border-white/5 relative overflow-hidden ${refResult > 1000 ? 'bg-red-950/50' : 'bg-green-950/50'}`}>
+                        <div className={`absolute inset-0 blur-3xl opacity-20 ${refResult > 1000 ? 'bg-red-500' : 'bg-green-500'}`}></div>
                         <div className="relative z-10">
                             <div className="text-[10px] text-slate-400 uppercase font-black tracking-[0.2em] mb-2 bg-black/20 inline-block px-3 py-1 rounded-full border border-white/5">Total Computed Value</div>
-                            <div className={`text-8xl font-black tracking-tighter ${refResult > 100 ? 'text-red-500 drop-shadow-[0_0_30px_rgba(239,68,68,0.5)]' : 'text-green-500 drop-shadow-[0_0_30px_rgba(34,197,94,0.5)]'}`}>
+                            <div className={`text-8xl font-black tracking-tighter ${refResult > 1000 ? 'text-red-500 drop-shadow-[0_0_30px_rgba(239,68,68,0.5)]' : 'text-green-500 drop-shadow-[0_0_30px_rgba(34,197,94,0.5)]'}`}>
                                 {refResult}<span className="text-5xl text-opacity-50 tracking-normal ml-1">g</span>
                             </div>
-                            <div className={`font-mono font-bold text-sm tracking-widest uppercase mt-2 ${refResult > 100 ? 'text-red-400' : 'text-green-400'}`}>
-                                {refResult > 100 ? <span className="flex items-center justify-center gap-2"><AlertTriangle size={14}/> Budget Exceeded</span> : <span className="flex items-center justify-center gap-2"><Check size={14}/> Within Parameters</span>}
+                            <div className={`font-mono font-bold text-sm tracking-widest uppercase mt-2 ${refResult > 1000 ? 'text-red-400' : 'text-green-400'}`}>
+                                {refResult > 1000 ? <span className="flex items-center justify-center gap-2"><AlertTriangle size={14}/> Budget Exceeded</span> : <span className="flex items-center justify-center gap-2"><Check size={14}/> Within Parameters</span>}
                             </div>
                         </div>
                     </div>
@@ -1825,7 +1880,7 @@ function AppContent() {
                             <Coins size={20}/> GLOBAL TEAM BUDGET
                         </h3>
                         <div className="flex items-center gap-4">
-                            <input id="sandbox-budget" type="number" defaultValue={lobbyTeams[0]?.budget ?? 100} className="w-32 bg-black/60 border border-yellow-500/20 rounded-lg p-3 text-center text-yellow-400 font-mono font-black text-lg outline-none focus:border-yellow-500 transition-colors" />
+                            <input id="sandbox-budget" type="number" defaultValue={lobbyTeams[0]?.budget ?? 1000} className="w-32 bg-black/60 border border-yellow-500/20 rounded-lg p-3 text-center text-yellow-400 font-mono font-black text-lg outline-none focus:border-yellow-500 transition-colors" />
                             <span className="text-yellow-500/60 font-bold text-xs uppercase tracking-widest">Gold per team</span>
                             <button disabled={isProcessing} onClick={() => {
                                 const val = parseInt((document.getElementById('sandbox-budget') as HTMLInputElement).value);
@@ -1981,6 +2036,16 @@ function AppContent() {
     <div className="min-h-screen text-white flex flex-col lg:flex-row font-sans lg:overflow-hidden bg-[#050b14] relative">
       <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150 mix-blend-overlay pointer-events-none fixed"></div>
       
+      <TeamArmyPanel 
+          isOpen={showTeamPanel}
+          onClose={() => setShowTeamPanel(false)}
+          teamPurchases={teamPurchases}
+          teamPlayers={lobbyTeams.find(t => t.id === teamId)?.players || []}
+          currentPlayerId={playerId || ''}
+          dbItems={dbItems}
+          getImageUrl={getImageUrl}
+      />
+
       {petModalItem && (
           <div className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-4 backdrop-blur-xl animate-fade-in" onClick={() => setPetModalItem(null)}>
               <div className="glass border border-white/10 rounded-[2.5rem] p-10 w-full max-w-3xl shadow-2xl animate-slide-up relative overflow-hidden bg-[#0a101f] will-change-transform" onClick={e => e.stopPropagation()}>
@@ -2005,7 +2070,8 @@ function AppContent() {
       )}
 
       <div className="flex-1 h-auto lg:h-screen lg:overflow-y-auto pb-24 lg:pb-32 scroll-smooth relative custom-scrollbar">
-        <header className="glass sticky top-0 z-50 px-4 py-3 lg:px-8 lg:py-5 flex flex-col lg:flex-row lg:justify-between lg:items-center gap-4 lg:gap-0 shadow-2xl border-b border-white/5 backdrop-blur-xl bg-[#050b14]/80">
+        <header className="glass sticky top-0 z-50 p-4 lg:px-8 lg:py-5 shadow-2xl border-b border-white/5 backdrop-blur-xl bg-[#050b14]/80">
+          <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-4 lg:gap-0">
             <div className="flex items-center gap-4 lg:gap-6">
                 <div className="bg-gradient-to-br from-yellow-400 to-yellow-600 p-2 lg:p-3 rounded-2xl text-black shadow-[0_0_20px_rgba(234,179,8,0.3)] animate-pulse-slow">
                     <Shield size={24} className="lg:w-7 lg:h-7" strokeWidth={2.5}/>
@@ -2037,11 +2103,26 @@ function AppContent() {
                         <div className="text-sm font-black text-slate-200">{getCurrentWeight('spell')}<span className="text-slate-600 mx-1 font-normal">/</span>{LIMITS.spell}</div>
                     </div>
                 </div>
+
+
                 
-                <div className="bg-black/40 px-4 py-2 lg:pl-6 lg:pr-5 lg:py-3 rounded-full border border-yellow-500/30 flex items-center gap-2 lg:gap-4 shadow-[0_0_20px_rgba(234,179,8,0.15)] backdrop-blur-md group hover:border-yellow-500/50 transition-colors">
-                    <div className="text-2xl lg:text-3xl font-black font-mono text-yellow-500 tracking-tighter drop-shadow-sm group-hover:scale-110 transition-transform origin-right w-[80px] text-right"><NumberTicker value={teamBudget} /></div>
+                <div className="bg-black/40 px-3 py-2 lg:pl-5 lg:pr-5 lg:py-3 rounded-full border border-yellow-500/30 flex items-center gap-2 lg:gap-4 shadow-[0_0_20px_rgba(234,179,8,0.15)] backdrop-blur-md group hover:border-yellow-500/50 transition-colors cursor-pointer" onClick={() => setShowTransactions(true)}>
+                    <div className="flex flex-col items-end pr-2 lg:pr-4 border-r border-yellow-500/20">
+                        <span className="text-[7px] lg:text-[9px] font-black text-yellow-500/50 tracking-widest uppercase mb-px">My Cost</span>
+                        <span className="text-xs lg:text-sm font-black font-mono text-yellow-500/80">{myPurchases.reduce((a, p) => a + (p.price_paid || 0), 0)}G</span>
+                    </div>
+                    <div className="text-2xl lg:text-3xl font-black font-mono text-yellow-500 tracking-tighter drop-shadow-sm group-hover:scale-105 transition-transform origin-right w-[60px] lg:w-[80px] text-right"><NumberTicker value={teamBudget} /></div>
                     <Coins className="text-yellow-400 drop-shadow-[0_0_10px_rgba(234,179,8,0.5)] w-5 h-5 lg:w-6 lg:h-6"/>
                 </div>
+
+                <button 
+                    onClick={() => setShowTeamPanel(true)} 
+                    className="bg-blue-500/10 hover:bg-blue-500/20 p-2 lg:p-4 rounded-xl lg:rounded-2xl text-blue-400 transition-all border border-blue-500/20 hover:border-blue-500/40 relative group" 
+                    title="View Teammates' Armies"
+                >
+                    <Users className="w-5 h-5 lg:w-6 lg:h-6 group-hover:scale-110 transition-transform" />
+                    <span className="hidden lg:block absolute -bottom-6 left-1/2 -translate-x-1/2 text-[9px] font-black tracking-widest uppercase opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap text-blue-400">Team</span>
+                </button>
                 
                 {!isLocked && (
                 <button onClick={handleLeave} className="bg-red-500/10 hover:bg-red-500/20 p-2 lg:p-4 rounded-xl lg:rounded-2xl text-red-500 hover:text-red-400 transition-all border border-red-500/20 hover:border-red-500/40 hover:shadow-[0_0_20px_rgba(239,68,68,0.2)] group" title="Exit Match">
@@ -2049,6 +2130,25 @@ function AppContent() {
                 </button>
                 )}
             </div>
+          </div>
+
+          {/* Mobile Army Capacity Row */}
+          <div className="flex xl:hidden w-full justify-around bg-black/20 py-2 px-2 rounded-xl border border-white/5 mt-4 lg:mt-0 shadow-inner">
+              <div className="text-center flex flex-col items-center justify-center">
+                  <div className="text-[9px] font-black text-blue-500 tracking-widest mb-0.5 opacity-80 backdrop-blur-sm">TROOPS</div>
+                  <div className="text-xs font-black text-slate-200">{getCurrentWeight('troop')}<span className="text-slate-600 mx-0.5 font-normal">/</span>{LIMITS.troop}</div>
+              </div>
+              <div className="w-px bg-white/5 my-1"></div>
+              <div className="text-center flex flex-col items-center justify-center">
+                  <div className="text-[9px] font-black text-orange-500 tracking-widest mb-0.5 opacity-80 backdrop-blur-sm">SIEGES</div>
+                  <div className="text-xs font-black text-slate-200">{getCurrentWeight('siege')}<span className="text-slate-600 mx-0.5 font-normal">/</span>{LIMITS.siege}</div>
+              </div>
+              <div className="w-px bg-white/5 my-1"></div>
+              <div className="text-center flex flex-col items-center justify-center">
+                  <div className="text-[9px] font-black text-purple-500 tracking-widest mb-0.5 opacity-80 backdrop-blur-sm">SPELLS</div>
+                  <div className="text-xs font-black text-slate-200">{getCurrentWeight('spell')}<span className="text-slate-600 mx-0.5 font-normal">/</span>{LIMITS.spell}</div>
+              </div>
+          </div>
         </header>
 
         <main className="p-4 pb-24 lg:p-8 lg:pb-32 max-w-[1800px] mx-auto space-y-10 lg:space-y-20 animate-fade-in relative z-10">
