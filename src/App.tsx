@@ -1,15 +1,18 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import { LoginView } from './components/LoginView';
 import { CallsignModal } from './components/CallsignModal';
 import { ProfileBadge } from './components/ProfileBadge';
-import { UserSettings } from './components/UserSettings';
-import { MatchLogs } from './components/MatchLogs';
-import { TeamHub } from './components/TeamHub';
-import { TournamentHub } from './components/TournamentHub';
-import { TournamentView } from './components/TournamentView';
+
+// Lazy-loaded route components (code splitting)
+const LoginView = lazy(() => import('./components/LoginView').then(m => ({ default: m.LoginView })));
+const UserSettings = lazy(() => import('./components/UserSettings').then(m => ({ default: m.UserSettings })));
+const MatchLogs = lazy(() => import('./components/MatchLogs').then(m => ({ default: m.MatchLogs })));
+const TeamHub = lazy(() => import('./components/TeamHub').then(m => ({ default: m.TeamHub })));
+const TournamentHub = lazy(() => import('./components/TournamentHub').then(m => ({ default: m.TournamentHub })));
+const TournamentView = lazy(() => import('./components/TournamentView').then(m => ({ default: m.TournamentView })));
+const TeamArmyPanel = lazy(() => import('./components/TeamArmyPanel').then(m => ({ default: m.TeamArmyPanel })));
 
 import { Shield, Sword, Coins, ExternalLink, Hammer, Crown, Minus, Check, Users, RefreshCw, Trash2, Trophy, ArrowRightLeft, LogOut, Gavel, MonitorPlay, ClipboardCheck, AlertTriangle, Loader2, Edit2, Save, X, Tv, PawPrint, Castle, Terminal, Wifi, Lock, Zap, Skull, Hexagon, Crosshair, Settings, ArrowRight, ChevronRight, ArrowLeft } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
@@ -17,7 +20,6 @@ import { confirmToast } from './utils/confirmToast';
 import { isSafeUrl } from './lib/sanitize';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
-import { TeamArmyPanel } from './components/TeamArmyPanel';
 
 // --- TYPES ---
 const HERO_LINK_IDS: Record<string, number> = { BK: 0, AQ: 1, GW: 2, RC: 4, MP: 6, DD: 7 };
@@ -2624,13 +2626,25 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 1000 * 60, refetchOnWindowFocus: false } }
 });
 
+// Suspense fallback — matches the app's dark theme
+const SuspenseFallback = () => (
+  <div className="min-h-screen flex items-center justify-center">
+    <div className="flex flex-col items-center gap-3 opacity-60">
+      <div className="w-8 h-8 border-2 border-sky-400/50 border-t-sky-400 rounded-full animate-spin" />
+      <span className="text-xs tracking-widest uppercase text-sky-300 font-semibold">Loading</span>
+    </div>
+  </div>
+);
+
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
     <AuthProvider>
       <Toaster position="bottom-right" toastOptions={{ style: { background: '#0a101f', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', fontFamily: 'inherit', fontSize: '13px', fontWeight: 600, letterSpacing: '0.03em' }, success: { iconTheme: { primary: '#22c55e', secondary: '#fff' } }, error: { iconTheme: { primary: '#ef4444', secondary: '#fff' } } }} />
       <CallsignModal />
-      <AppContent />
+      <Suspense fallback={<SuspenseFallback />}>
+        <AppContent />
+      </Suspense>
     </AuthProvider>
     </QueryClientProvider>
   );
