@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -246,6 +246,7 @@ function LobbyCodeSync({ setLobbyCode }: { setLobbyCode: (c: string) => void }) 
 function AppContent() {
   const { user, profile, loading, supabase } = useAuth();
   const navigate = useNavigate();
+  const foundLobbyRef = useRef<any>(null);
   const location = useLocation();
   // const [view, setView] = useState<View>('login'); // Replaced by Router
   // const [previousView, setPreviousView] = useState<View>('login'); // Handled by history
@@ -253,6 +254,8 @@ function AppContent() {
   const [playerName, setPlayerName] = useState('');
   
   const [foundLobby, setFoundLobby] = useState<any>(null);
+  // Keep ref in sync so realtime callbacks always have latest value
+  useEffect(() => { foundLobbyRef.current = foundLobby; }, [foundLobby]);
   const [lobbyTeams, setLobbyTeams] = useState<any[]>([]);
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [teamId, setTeamId] = useState<string | null>(null);
@@ -440,7 +443,7 @@ function AppContent() {
           const { data: player } = await supabase.from('players').select('id, name, team_id, is_locked').eq('id', storedPid).single();
           if (player && player.team_id === storedTid) {
               setPlayerId(player.id); setTeamId(player.team_id); setPlayerName(player.name); setLobbyCode(storedLobby); setIsLocked(player.is_locked || false);
-              const { data: lobby } = await supabase.from('lobbies').select('*').eq('code', storedLobby).single();
+              const { data: lobby } = await supabase.from('lobbies').select('*').ilike('code', storedLobby).single();
               if (lobby) { setFoundLobby(lobby); const { data: team } = await supabase.from('teams').select('name').eq('id', storedTid).single(); setTeamName(team?.name || ''); fetchTeams(lobby.id); navigate('/game'); }
           }
       }
@@ -695,9 +698,7 @@ function AppContent() {
     
     localStorage.setItem('iw_pid', p.id);
     localStorage.setItem('iw_tid', tIdData!.id);
-    localStorage.setItem('iw_lobby', lobbyCode);
-
-    localStorage.setItem('iw_lobby', lobbyCode);
+    localStorage.setItem('iw_lobby', lobbyCode.toUpperCase());
     setPlayerId(p.id); setTeamId(tIdData!.id); setTeamName(tName);
     if (foundLobby) await fetchTeams(foundLobby.id);
     navigate('/game');
@@ -707,15 +708,24 @@ function AppContent() {
   useEffect(() => {
     if (location.pathname === '/game' && teamId) {
       fetchGameState();
+      // Also refresh lobbyTeams so teammate panel has data after reload
+      if (foundLobby) {
+          fetchTeams(foundLobby.id);
+      } else if (lobbyCode) {
+          supabase.from('lobbies').select('id').eq('code', lobbyCode).single().then(({ data: L }) => {
+              if (L) fetchTeams(L.id);
+          });
+      }
       console.log('[Realtime] Subscribing to game updates for team:', teamId);
       const ch = supabase.channel(`game-${teamId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'teams', filter: `id=eq.${teamId}` }, p => { if(p.new && (p.new as any).budget !== undefined) setTeamBudget((p.new as any).budget); })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'purchases', filter: `team_id=eq.${teamId}` }, () => fetchGameState())
         .on('postgres_changes', { event: '*', schema: 'public', table: 'players', filter: `team_id=eq.${teamId}` }, async (payload) => { 
             // 1. Handle logic for ALL players in the team (someone joined, left, bought stuff, toggled lock)
-            if (foundLobby) await fetchTeams(foundLobby.id);
+            const lobby = foundLobbyRef.current;
+            if (lobby) await fetchTeams(lobby.id);
             else if (lobbyCode) {
-                 const { data: L } = await supabase.from('lobbies').select('id').eq('code', lobbyCode).single();
+                 const { data: L } = await supabase.from('lobbies').select('id').ilike('code', lobbyCode).single();
                  if (L) await fetchTeams(L.id);
             }
             
@@ -746,9 +756,26 @@ function AppContent() {
         .subscribe((status) => {
             console.log('[Realtime] Subscription status:', status);
         });
+
+      // Second channel: lobby-wide player changes (ensures teammate panel updates on join/leave)
+      const lobbyId = foundLobbyRef.current?.id;
+      const refreshTeams = async () => {
+          const lobby = foundLobbyRef.current;
+          if (lobby) await fetchTeams(lobby.id);
+          else if (lobbyCode) {
+              const { data: L } = await supabase.from('lobbies').select('id').ilike('code', lobbyCode).single();
+              if (L) await fetchTeams(L.id);
+          }
+      };
+      const lobbyChannel = supabase.channel(`lobby-players-${lobbyId || teamId}`)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'players' }, refreshTeams)
+        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'players' }, refreshTeams)
+        .subscribe();
+
       return () => { 
           console.log('[Realtime] Unsubscribing from game updates for team:', teamId);
-          supabase.removeChannel(ch); 
+          supabase.removeChannel(ch);
+          supabase.removeChannel(lobbyChannel);
       };
     }
     if (foundLobby && (location.pathname === '/moderator' || location.pathname.startsWith('/stream/'))) {
@@ -766,7 +793,7 @@ function AppContent() {
         .subscribe();
       return () => { supabase.removeChannel(ch); };
     }
-  }, [location.pathname, teamId, foundLobby, playerId]);
+  }, [location.pathname, teamId, foundLobby, playerId, lobbyCode]);
 
   const fetchGameState = async () => {
     const { data: t } = await supabase.from('teams').select('budget').eq('id', teamId!).single();
@@ -2116,7 +2143,7 @@ function AppContent() {
                 </div>
 
                 <button 
-                    onClick={() => setShowTeamPanel(true)} 
+                    onClick={() => setShowTeamPanel(p => !p)} 
                     className="bg-blue-500/10 hover:bg-blue-500/20 p-2 lg:p-4 rounded-xl lg:rounded-2xl text-blue-400 transition-all border border-blue-500/20 hover:border-blue-500/40 relative group" 
                     title="View Teammates' Armies"
                 >
