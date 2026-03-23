@@ -433,7 +433,7 @@ function AppContent() {
   };
 
   const fetchTeams = async (lId: string) => {
-    const { data: teams } = await supabase.from('teams').select('*, players(id, name, army_link, is_locked, purchases(item_id, equipped_hero, is_cc))').eq('lobby_id', lId).order('created_at', { ascending: true });
+    const { data: teams } = await supabase.from('teams').select('*, players(id, name, army_link, is_locked, user_id, purchases(item_id, equipped_hero, is_cc))').eq('lobby_id', lId).order('created_at', { ascending: true });
     if (teams) setLobbyTeams(teams);
   };
 
@@ -1437,16 +1437,17 @@ function AppContent() {
                               {(() => {
                                   const isLocked = team.roster_id && team.roster_id !== userRosterId;
                                   const isMyTeam = team.roster_id && team.roster_id === userRosterId;
-                                  const isFull = team.players?.length >= 3;
+                                  const isAlreadyInTeam = team.players?.some((p: any) => p.user_id === user?.id);
+                                  const isFull = !isAlreadyInTeam && (team.players?.length >= 3);
                                   
                                   return (
                                       <button 
                                         onClick={() => handleJoinTeam(team.name)} 
                                         disabled={isFull || isLocked || deployLoading} 
-                                        className={`w-full py-5 rounded-xl font-black uppercase tracking-widest transition-all duration-300 shadow-xl flex items-center justify-center gap-2 ${isFull ? 'bg-slate-800 text-slate-600 cursor-not-allowed border border-white/5' : isLocked ? 'bg-red-950/40 text-red-500/50 cursor-not-allowed border border-red-500/20 hover:border-red-500/50 hover:bg-red-900/30 text-red-400' : isMyTeam ? 'bg-blue-600 text-white hover:bg-blue-500 hover:scale-[1.02] shadow-[0_0_20px_rgba(37,99,235,0.4)]' : 'bg-white text-black hover:bg-blue-50 hover:scale-[1.02] hover:shadow-white/20'}`}
+                                        className={`w-full py-5 rounded-xl font-black uppercase tracking-widest transition-all duration-300 shadow-xl flex items-center justify-center gap-2 ${isAlreadyInTeam ? 'bg-emerald-600 text-white hover:bg-emerald-500 hover:scale-[1.02] shadow-[0_0_30px_rgba(16,185,129,0.3)] border border-emerald-400/50' : isFull ? 'bg-slate-800 text-slate-600 cursor-not-allowed border border-white/5' : isLocked ? 'bg-red-950/40 text-red-500/50 cursor-not-allowed border border-red-500/20 hover:border-red-500/50 hover:bg-red-900/30 text-red-400' : isMyTeam ? 'bg-blue-600 text-white hover:bg-blue-500 hover:scale-[1.02] shadow-[0_0_20px_rgba(37,99,235,0.4)]' : 'bg-white text-black hover:bg-blue-50 hover:scale-[1.02] hover:shadow-white/20'}`}
                                       >
-                                          {deployLoading ? <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> : isFull ? <Lock size={16}/> : isLocked ? <Lock size={16} className="text-red-500 mb-0.5"/> : <Zap size={18} className={isMyTeam ? 'text-white' : (idx===0?'text-blue-600':'text-purple-600')} />}
-                                          {deployLoading ? 'VERIFYING...' : isFull ? 'UNIT FULL' : isLocked ? 'RESTRICTED' : isMyTeam ? 'JOIN YOUR TEAM' : 'INITIATE LINK'}
+                                          {deployLoading ? <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> : isAlreadyInTeam ? <Zap size={18} className="text-white"/> : isFull ? <Lock size={16}/> : isLocked ? <Lock size={16} className="text-red-500 mb-0.5"/> : <Zap size={18} className={isMyTeam ? 'text-white' : (idx===0?'text-blue-600':'text-purple-600')} />}
+                                          {deployLoading ? 'VERIFYING...' : isAlreadyInTeam ? 'REJOIN TEAM' : isFull ? 'UNIT FULL' : isLocked ? 'RESTRICTED' : isMyTeam ? 'JOIN YOUR TEAM' : 'INITIATE LINK'}
                                       </button>
                                   );
                               })()}
