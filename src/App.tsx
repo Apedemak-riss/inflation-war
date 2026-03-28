@@ -701,7 +701,7 @@ function AppContent() {
     localStorage.setItem('iw_pid', p.id);
     localStorage.setItem('iw_tid', tIdData!.id);
     localStorage.setItem('iw_lobby', lobbyCode.toUpperCase());
-    setPlayerId(p.id); setTeamId(tIdData!.id); setTeamName(tName);
+    setPlayerId(p.id); setTeamId(tIdData!.id); setTeamName(tName); setIsLocked(p.is_locked || false);
     if (foundLobby) await fetchTeams(foundLobby.id);
     navigate('/game');
   };
