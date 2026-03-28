@@ -1382,14 +1382,14 @@ function AppContent() {
                       <Wifi size={12} className="animate-pulse"/> Secure Link Established
                   </div>
                   <div>
-                    <h2 className="text-5xl lg:text-7xl font-black text-white tracking-tighter drop-shadow-2xl mb-2">{lobbyCode}</h2>
+                    <h2 className="text-5xl lg:text-7xl font-black text-white tracking-tighter drop-shadow-2xl mb-2" translate="no">{lobbyCode}</h2>
                     <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">Mission Control Lobby</p>
                   </div>
                   
                   <div className="relative max-w-lg mx-auto group">
                       <div className="absolute -inset-1 bg-gradient-to-r from-yellow-500/0 via-yellow-500/50 to-yellow-500/0 rounded-lg opacity-0 group-focus-within:opacity-100 transition duration-500 blur-md"></div>
                       {profile && profile.username && !profile.username.startsWith('Recruit_') ? (
-                        <div className="relative bg-[#0a101f] border border-green-500/30 text-2xl lg:text-4xl font-black text-center text-white px-4 py-4 lg:px-8 lg:py-6 w-full rounded-2xl shadow-xl flex items-center justify-center gap-3">
+                        <div className="relative bg-[#0a101f] border border-green-500/30 text-2xl lg:text-4xl font-black text-center text-white px-4 py-4 lg:px-8 lg:py-6 w-full rounded-2xl shadow-xl flex items-center justify-center gap-3" translate="no">
                           <div className="w-3 h-3 rounded-full bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.6)] shrink-0" />
                           <span>{profile.username}</span>
                           <span className="text-[10px] text-green-400/60 font-bold tracking-[0.2em] uppercase absolute bottom-2 right-4">Verified</span>
@@ -1401,6 +1401,7 @@ function AppContent() {
                           className="relative bg-[#0a101f] border border-white/10 text-2xl lg:text-4xl font-black text-center text-white focus:border-yellow-500/50 outline-none px-4 py-4 lg:px-8 lg:py-6 w-full placeholder:text-slate-800 transition-all rounded-2xl shadow-xl" 
                           placeholder="ENTER CALLSIGN" 
                           autoFocus
+                          translate="no"
                         />
                       )}
                   </div>
@@ -1516,6 +1517,7 @@ function AppContent() {
                                       className="w-full bg-transparent p-3 lg:p-5 text-center text-xl lg:text-3xl font-black font-mono uppercase tracking-[0.2em] outline-none text-white placeholder:text-slate-800 transition-all focus:placeholder:text-slate-700" 
                                       placeholder="LOBBY ID" 
                                       autoFocus
+                                      translate="no"
                                   />
                               </div>
                           </div>

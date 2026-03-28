@@ -1,7 +1,8 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" translate="no" class="notranslate">
   <head>
     <meta charset="UTF-8" />
+    <meta name="google" content="notranslate" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     
@@ -11,8 +12,39 @@
     
     <title>Inflation War</title>
   </head>
-  <body>
-    <div id="root"></div>
+  <body translate="no" class="notranslate">
+    <div id="root" translate="no"></div>
+    <script>
+      // Protect against browser translation engines (Firefox/Zen/Chrome) that ignore
+      // the html-level translate="no" attribute. This observer detects when translation
+      // engines wrap text in <font> tags or modify input values, and reverts the changes.
+      (function() {
+        var observer = new MutationObserver(function(mutations) {
+          mutations.forEach(function(m) {
+            // Translation engines (especially Firefox) insert <font> wrappers around text
+            if (m.type === 'childList') {
+              m.addedNodes.forEach(function(node) {
+                if (node.nodeName === 'FONT' && node.parentElement) {
+                  // Unwrap: replace the <font> with its original text content
+                  var text = document.createTextNode(node.textContent || '');
+                  node.parentElement.replaceChild(text, node);
+                }
+              });
+            }
+            // Catch attribute changes (e.g., translation modifying value attributes)
+            if (m.type === 'attributes' && m.attributeName === 'value' && m.target.tagName === 'INPUT') {
+              // React controlled inputs will fix themselves on next render cycle
+            }
+          });
+        });
+        observer.observe(document.documentElement, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['value', 'lang']
+        });
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
