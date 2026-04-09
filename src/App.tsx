@@ -90,6 +90,11 @@ const RAW_DATA = [
   { name: "Metal Pants", dataId: 103, type: 'equipment', hero: 'MP', weight: 0 },
   { name: "Meteor Staff", dataId: 104, type: 'equipment', hero: 'MP', weight: 0 },
   { name: "Noble Iron", dataId: 105, type: 'equipment', hero: 'MP', weight: 0 },
+  // Dragon Duke Equipment
+  { name: "Fire Heart", dataId: 52, type: 'equipment', hero: 'DD', weight: 0 },
+  { name: "Flame Breath", dataId: 57, type: 'equipment', hero: 'DD', weight: 0 },
+  { name: "Stun Blast", dataId: 56, type: 'equipment', hero: 'DD', weight: 0 },
+  { name: "Rocket Backpack", dataId: 53, type: 'equipment', hero: 'DD', weight: 0 },
   // Sieges
   { name: "Wall Wrecker", dataId: 4000051, type: 'siege', weight: 1 },
   { name: "Battle Blimp", dataId: 4000052, type: 'siege', weight: 1 },
@@ -185,6 +190,7 @@ const getImageUrl = (name: string, type: string, hero?: string | null) => {
   if (name === "Fire Heart") return "/fire-heart.png";
   if (name === "Flame Breath") return "/flame-breath.png";
   if (name === "Stun Blast") return "/stun-blast.png";
+  if (name === "Rocket Backpack") return "/rocket-backpack.png";
   if (name === "Greedy Raven") return "/greedy-raven.png";
   const REPO_ROOT = "https://cdn.jsdelivr.net/gh/ClashKingInc/ClashKingAssets@main/assets/home-base";
   if (type === 'pet') return `${REPO_ROOT}/pet-pics/Icon_HV_Hero_Pets_${name.replace(/ /g, "_")}.png`;
