@@ -292,7 +292,7 @@ function AppContent() {
   const [participantToRosterMap, setParticipantToRosterMap] = useState<Record<string, string>>({});
   const [challongeParticipantMap, setChallongeParticipantMap] = useState<Record<string, string>>({}); // Restored back for fallback display name resolution
 
-  const [teamBudget, setTeamBudget] = useState(1000);
+  const [teamBudget, setTeamBudget] = useState(1050);
   const [dbItems, setDbItems] = useState<Item[]>([]);
   const [teamPurchases, setTeamPurchases] = useState<any[]>([]);
   const [myPurchases, setMyPurchases] = useState<any[]>([]);
@@ -498,7 +498,7 @@ function AppContent() {
       let { data: lobby } = await withTimeout<any>(supabase.from('lobbies').select('*').eq('code', code).single());
       if (mode === '/moderator' && !lobby) {
          const { data: nl } = await withTimeout<any>(supabase.from('lobbies').insert({ code }).select().single());
-         lobby = nl; await withTimeout(supabase.from('teams').insert([{ lobby_id: nl.id, name: 'Team 1', budget: 1000 }, { lobby_id: nl.id, name: 'Team 2', budget: 1000 }]));
+         lobby = nl; await withTimeout(supabase.from('teams').insert([{ lobby_id: nl.id, name: 'Team 1', budget: 1050 }, { lobby_id: nl.id, name: 'Team 2', budget: 1050 }]));
       } else if (!lobby) { setLoading(false); toast.error('Lobby not found.'); return; }
       setFoundLobby(lobby); 
       fetchTeams(lobby.id); 
@@ -1240,7 +1240,7 @@ function AppContent() {
       fetchTeams(foundLobby.id); 
   };
   const handleReset = async (tId: string) => { 
-      if(!(await confirmToast('Initiate Protocol: Purge & Reset? This will delete all team purchases and restore the budget to 1000g.'))) return;
+      if(!(await confirmToast('Initiate Protocol: Purge & Reset? This will delete all team purchases and restore the budget to 1050g.'))) return;
       await supabase.rpc('moderator_reset_team', { p_team_id: tId }); 
       fetchTeams(foundLobby.id); 
   };
@@ -1274,9 +1274,10 @@ function AppContent() {
 
         <div className="flex flex-wrap gap-2 relative z-10 min-h-[40px]">
             {unique.map(i => (
-                <div key={i.id} className="relative w-9 h-9 bg-[#0a101f] rounded-md border border-orange-500/20 shadow-inner hover:border-orange-500 max-w-full">
+                <div key={i.id} className="relative w-9 h-9 bg-[#0a101f] rounded-md border border-orange-500/20 shadow-inner hover:border-orange-500 max-w-full group/cc">
                     <img src={getImageUrl(i.name, i.type)} className="w-full h-full object-contain p-1" />
                     <div className="absolute -top-1.5 -right-1.5 bg-orange-500 text-black text-[9px] font-black w-3.5 h-3.5 flex items-center justify-center rounded shadow-md">{counts[i.id]}</div>
+                    {!isLocked && <button onClick={() => handleSell(i)} disabled={isProcessing} className="absolute -bottom-1.5 -left-1.5 z-20 bg-red-500 hover:bg-red-400 text-white w-4 h-4 flex items-center justify-center rounded shadow-md opacity-100 lg:opacity-0 lg:group-hover/cc:opacity-100 transition-opacity active:scale-90" title={`Remove ${i.name}`}><Minus size={10} strokeWidth={4} /></button>}
                 </div>
             ))}
             {active.length === 0 && <span className="text-[10px] text-orange-500/30 font-bold uppercase tracking-widest py-2 w-full text-center border border-dashed border-orange-500/20 rounded">Empty Bunker</span>}
@@ -1712,15 +1713,15 @@ function AppContent() {
             
             {refResult !== null && (
                 <div className="mt-10 glass rounded-2xl overflow-hidden border border-white/10 shadow-2xl animate-slide-up relative z-10">
-                    <div className={`text-center p-8 border-b border-white/5 relative overflow-hidden ${refResult > 1000 ? 'bg-red-950/50' : 'bg-green-950/50'}`}>
-                        <div className={`absolute inset-0 blur-3xl opacity-20 ${refResult > 1000 ? 'bg-red-500' : 'bg-green-500'}`}></div>
+                    <div className={`text-center p-8 border-b border-white/5 relative overflow-hidden ${refResult > 1050 ? 'bg-red-950/50' : 'bg-green-950/50'}`}>
+                        <div className={`absolute inset-0 blur-3xl opacity-20 ${refResult > 1050 ? 'bg-red-500' : 'bg-green-500'}`}></div>
                         <div className="relative z-10">
                             <div className="text-[10px] text-slate-400 uppercase font-black tracking-[0.2em] mb-2 bg-black/20 inline-block px-3 py-1 rounded-full border border-white/5">Total Computed Value</div>
-                            <div className={`text-8xl font-black tracking-tighter ${refResult > 1000 ? 'text-red-500 drop-shadow-[0_0_30px_rgba(239,68,68,0.5)]' : 'text-green-500 drop-shadow-[0_0_30px_rgba(34,197,94,0.5)]'}`}>
+                            <div className={`text-8xl font-black tracking-tighter ${refResult > 1050 ? 'text-red-500 drop-shadow-[0_0_30px_rgba(239,68,68,0.5)]' : 'text-green-500 drop-shadow-[0_0_30px_rgba(34,197,94,0.5)]'}`}>
                                 {refResult}<span className="text-5xl text-opacity-50 tracking-normal ml-1">g</span>
                             </div>
-                            <div className={`font-mono font-bold text-sm tracking-widest uppercase mt-2 ${refResult > 1000 ? 'text-red-400' : 'text-green-400'}`}>
-                                {refResult > 1000 ? <span className="flex items-center justify-center gap-2"><AlertTriangle size={14}/> Budget Exceeded</span> : <span className="flex items-center justify-center gap-2"><Check size={14}/> Within Parameters</span>}
+                            <div className={`font-mono font-bold text-sm tracking-widest uppercase mt-2 ${refResult > 1050 ? 'text-red-400' : 'text-green-400'}`}>
+                                {refResult > 1050 ? <span className="flex items-center justify-center gap-2"><AlertTriangle size={14}/> Budget Exceeded</span> : <span className="flex items-center justify-center gap-2"><Check size={14}/> Within Parameters</span>}
                             </div>
                         </div>
                     </div>
@@ -1918,7 +1919,7 @@ function AppContent() {
                             <Coins size={20}/> GLOBAL TEAM BUDGET
                         </h3>
                         <div className="flex items-center gap-4">
-                            <input id="sandbox-budget" type="number" defaultValue={lobbyTeams[0]?.budget ?? 1000} className="w-32 bg-black/60 border border-yellow-500/20 rounded-lg p-3 text-center text-yellow-400 font-mono font-black text-lg outline-none focus:border-yellow-500 transition-colors" />
+                            <input id="sandbox-budget" type="number" defaultValue={lobbyTeams[0]?.budget ?? 1050} className="w-32 bg-black/60 border border-yellow-500/20 rounded-lg p-3 text-center text-yellow-400 font-mono font-black text-lg outline-none focus:border-yellow-500 transition-colors" />
                             <span className="text-yellow-500/60 font-bold text-xs uppercase tracking-widest">Gold per team</span>
                             <button disabled={isProcessing} onClick={() => {
                                 const val = parseInt((document.getElementById('sandbox-budget') as HTMLInputElement).value);
@@ -2324,8 +2325,8 @@ function AppContent() {
                                 <span className="font-black text-slate-300 text-lg">{h}</span>
                             </div>
                             <div className="flex gap-2 flex-wrap">
-                                {active.filter(i => i.type === 'pet' && i.equipped_hero === h).map((pet, idx) => (<div className="relative group/pet"><img key={'p'+idx} src={getImageUrl(pet.name as string, 'pet')} className="w-8 h-8 lg:w-10 lg:h-10 bg-black/60 rounded-xl border border-green-500/50 p-1.5 shadow-inner"/><div className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full animate-pulse"></div></div>))}
-                                {active.filter(i => i.hero === h).map((eq,idx) => (<div className="relative group/eq"><img key={'e'+idx} src={getImageUrl(eq.name as string, 'equipment', h)} className="w-8 h-8 lg:w-10 lg:h-10 bg-black/60 rounded-xl border border-blue-500/30 p-1.5 shadow-inner"/><div className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full animate-pulse" style={{animationDelay: `${idx*200}ms`}}></div></div>))}
+                                {active.filter(i => i.type === 'pet' && i.equipped_hero === h).map((pet, idx) => (<div key={'p'+idx} className="relative group/pet"><img src={getImageUrl(pet.name as string, 'pet')} className="w-8 h-8 lg:w-10 lg:h-10 bg-black/60 rounded-xl border border-green-500/50 p-1.5 shadow-inner"/><div className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>{!isLocked && <button onClick={() => handleSell(pet)} disabled={isProcessing} className="absolute -bottom-1 -left-1 z-20 bg-red-500 hover:bg-red-400 text-white w-4 h-4 flex items-center justify-center rounded-full shadow-md opacity-100 lg:opacity-0 lg:group-hover/pet:opacity-100 transition-opacity active:scale-90" title={`Remove ${pet.name}`}><Minus size={9} strokeWidth={4} /></button>}</div>))}
+                                {active.filter(i => i.hero === h).map((eq, idx) => (<div key={'e'+idx} className="relative group/eq"><img src={getImageUrl(eq.name as string, 'equipment', h)} className="w-8 h-8 lg:w-10 lg:h-10 bg-black/60 rounded-xl border border-blue-500/30 p-1.5 shadow-inner"/><div className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full animate-pulse" style={{animationDelay: `${idx*200}ms`}}></div>{!isLocked && <button onClick={() => handleSell(eq)} disabled={isProcessing} className="absolute -bottom-1 -left-1 z-20 bg-red-500 hover:bg-red-400 text-white w-4 h-4 flex items-center justify-center rounded-full shadow-md opacity-100 lg:opacity-0 lg:group-hover/eq:opacity-100 transition-opacity active:scale-90" title={`Remove ${eq.name}`}><Minus size={9} strokeWidth={4} /></button>}</div>))}
                             </div>
                         </div>
                     )
@@ -2346,6 +2347,7 @@ function AppContent() {
                                         <div className={`absolute inset-0 bg-${color}-500/10 opacity-0 group-hover:opacity-100 transition-opacity`}></div>
                                         <img src={getImageUrl(i.name, i.type)} className="w-full h-full object-contain p-2 drop-shadow-sm relative z-10" />
                                         <div className={`absolute -top-0 -right-0 bg-${color}-500 text-black text-[9px] font-black w-4 h-4 lg:w-5 lg:h-5 flex items-center justify-center rounded-bl-xl shadow-md z-20`}>{counts[i.id]}</div>
+                                        {!isLocked && <button onClick={() => handleSell(i)} disabled={isProcessing} className="absolute bottom-0 left-0 z-30 bg-red-500 hover:bg-red-400 text-white w-4 h-4 lg:w-5 lg:h-5 flex items-center justify-center rounded-tr-xl shadow-md opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity active:scale-90" title={`Remove ${i.name}`}><Minus size={10} strokeWidth={4} /></button>}
                                     </div>
                                 ))}
                             </div>
