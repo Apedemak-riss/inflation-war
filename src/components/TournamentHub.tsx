@@ -201,8 +201,12 @@ export const TournamentHub: React.FC = () => {
                 
             if (insertError) throw insertError;
             
+            // Auto-lock the roster on tournament registration
+            const { error: lockError } = await supabase.rpc('lock_roster', { p_roster_id: captainRoster.id });
+            if (lockError) console.error('Failed to auto-lock roster:', lockError);
+            
             setRegisteredTournaments(prev => new Set(prev).add(tournament.id));
-            toast.success('Team successfully registered!');
+            toast.success('Team registered! Roster has been locked.');
         } catch (error: any) {
             console.error("Registration Error:", error);
             toast.error('Failed to register team: ' + error.message);

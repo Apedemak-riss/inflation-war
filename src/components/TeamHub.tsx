@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { ArrowLeft, Shield, Users, Crown, UserPlus, LogOut, Trash2, Copy, Check, X } from 'lucide-react';
+import { ArrowLeft, Shield, Users, Crown, UserPlus, LogOut, Trash2, Copy, Check, X, Lock, Unlock, ArrowRightLeft, UserMinus, AlertTriangle, ChevronUp } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { confirmToast } from '../utils/confirmToast';
 
@@ -17,6 +17,9 @@ export const TeamHub = () => {
     const [createTag, setCreateTag] = useState('');
     const [joinCode, setJoinCode] = useState('');
     const [copyFeedback, setCopyFeedback] = useState(false);
+
+    // Substitution States
+    const [subSwapSource, setSubSwapSource] = useState<string | null>(null); // user_id of the player being swapped out
 
     useEffect(() => {
         checkTeamStatus();
@@ -69,12 +72,25 @@ export const TeamHub = () => {
                     }
                 }
             )
+            // 3. Listen for roster lock/unlock changes
+            .on(
+                'postgres_changes',
+                {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'rosters',
+                    filter: `id=eq.${myTeam.id}`
+                },
+                (payload) => {
+                    setMyTeam((prev: any) => ({ ...prev, ...payload.new }));
+                }
+            )
             .subscribe();
 
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [myTeam?.id, user?.id, navigate]); // Depend on IDs, not full objects if possible, but keep simple for now
+    }, [myTeam?.id, user?.id, navigate]);
 
     const checkTeamStatus = async () => {
         try {
@@ -115,12 +131,6 @@ export const TeamHub = () => {
             setTeamMembers(data);
         }
     };
-    
-    // Helper to get best available name
-    // Priority: Metadata Username > Metadata Callsign > Email > Default
-    const getPlayerName = (u: any) => {
-        return u.user_metadata?.username || u.user_metadata?.callsign || u.email?.split('@')[0] || 'Operative';
-    };
 
     const handleCreateTeam = async () => {
         if (!createName || !createTag) { toast.error('Name and Tag required.'); return; }
@@ -140,7 +150,6 @@ export const TeamHub = () => {
                 .single();
 
             if (rosterError) {
-                // Check for unique violations (Postgres code 23505) OR explicitly check the message text
                 if (rosterError.code === '23505' || rosterError.message?.includes('unique constraint')) {
                     if (rosterError.message?.includes('rosters_tag_key') || rosterError.details?.includes('tag')) {
                         toast.error(`Unit Tag "${createTag}" is already claiming territory. Choose a unique identifier.`);
@@ -149,13 +158,13 @@ export const TeamHub = () => {
                     } else {
                         toast.error('Unit Identity conflict. Name or Tag is already in use.');
                     }
-                    setLoading(false); // Ensure loading is reset on specific errors
+                    setLoading(false);
                     return;
                 }
                 throw rosterError;
             }
 
-            // 2. Add Self as Member
+            // 2. Add Self as Member (role defaults to 'player')
             const { error: memberError } = await supabase
                 .from('roster_members')
                 .insert({
@@ -165,11 +174,10 @@ export const TeamHub = () => {
             
             if (memberError) throw memberError;
 
-            // Success - Refetch or wait for realtime
+            // Success
             await fetchTeamMembers(roster.id);
             setMyTeam(roster);
         } catch (err: any) {
-             // Fallback for other errors
             toast.error('Command Failure: ' + (err.message || 'Unknown Error'));
         } finally {
             setLoading(false);
@@ -181,24 +189,17 @@ export const TeamHub = () => {
 
         try {
             setLoading(true);
-            // 1. Find Roster by Code
-            const { data: roster, error: rosterError } = await supabase
-                .from('rosters')
-                .select('id')
-                .eq('invite_code', joinCode)
-                .single();
+            // Use server-side RPC that auto-assigns role (player if < 3, sub if < 2, full otherwise)
+            const { data, error } = await supabase.rpc('join_roster_secure', { p_invite_code: joinCode });
 
-            if (rosterError || !roster) throw new Error("Invalid Invite Code");
+            if (error) throw error;
 
-            // 2. Join
-            const { error: joinError } = await supabase
-                .from('roster_members')
-                .insert({
-                    roster_id: roster.id,
-                    user_id: user.id
-                });
-
-            if (joinError) throw joinError;
+            const assignedRole = data?.role || 'player';
+            if (assignedRole === 'sub') {
+                toast.success('Joined as a substitute! The roster already has 3 active players.');
+            } else {
+                toast.success('Joined as an active player!');
+            }
 
             // Refresh
             checkTeamStatus();
@@ -209,6 +210,10 @@ export const TeamHub = () => {
     };
 
     const handleLeaveTeam = async () => {
+        if (myTeam?.is_locked) {
+            toast.error('Roster is locked for a tournament. You cannot leave.');
+            return;
+        }
         if (!(await confirmToast('Are you sure you want to leave this team?'))) return;
         try {
             const { error } = await supabase
@@ -224,6 +229,10 @@ export const TeamHub = () => {
     };
 
     const handleKickMember = async (targetUserId: string) => {
+        if (myTeam?.is_locked) {
+            toast.error('Roster is locked for a tournament. Use substitution instead.');
+            return;
+        }
         if (!(await confirmToast('Kick this operative?'))) return;
         try {
             const { error } = await supabase
@@ -232,13 +241,16 @@ export const TeamHub = () => {
                 .eq('user_id', targetUserId)
                 .eq('roster_id', myTeam.id); 
             if (error) throw error;
-            // No need to fetchTeamMembers here, real-time subscription will catch it
         } catch (err: any) {
             toast.error('Error kicking member: ' + err.message);
         }
     };
 
     const handleDisbandTeam = async () => {
+        if (myTeam?.is_locked) {
+            toast.error('Cannot disband a team during an active tournament.');
+            return;
+        }
         if (!(await confirmToast('WARNING: Disbanding will delete the team permanently. Continue?'))) return;
         try {
             const { error } = await supabase
@@ -260,6 +272,66 @@ export const TeamHub = () => {
             setTimeout(() => setCopyFeedback(false), 2000);
         }
     };
+
+    // --- SUBSTITUTION HANDLERS ---
+    const handleSubstitute = async (playerUserId: string, subUserId: string) => {
+        const playerMember = teamMembers.find(m => m.user_id === playerUserId);
+        const subMember = teamMembers.find(m => m.user_id === subUserId);
+        const playerName = playerMember?.profiles?.username || 'Player';
+        const subName = subMember?.profiles?.username || 'Sub';
+
+        if (!(await confirmToast(`Swap ${playerName} (active) with ${subName} (sub)?`))) return;
+        
+        try {
+            const { error } = await supabase.rpc('substitute_player', {
+                p_roster_id: myTeam.id,
+                p_player_user_id: playerUserId,
+                p_sub_user_id: subUserId,
+            });
+            if (error) throw error;
+            toast.success(`${subName} is now active. ${playerName} moved to subs.`);
+            setSubSwapSource(null);
+            fetchTeamMembers(myTeam.id);
+        } catch (err: any) {
+            toast.error('Substitution failed: ' + err.message);
+        }
+    };
+
+    const handlePromoteSub = async (subUserId: string) => {
+        const subMember = teamMembers.find(m => m.user_id === subUserId);
+        const subName = subMember?.profiles?.username || 'Substitute';
+        if (!(await confirmToast(`Promote ${subName} to active player?`))) return;
+        try {
+            const { error } = await supabase.rpc('promote_sub', {
+                p_roster_id: myTeam.id,
+                p_sub_user_id: subUserId,
+            });
+            if (error) throw error;
+            toast.success(`${subName} promoted to active player!`);
+            fetchTeamMembers(myTeam.id);
+        } catch (err: any) {
+            toast.error('Promotion failed: ' + err.message);
+        }
+    };
+
+    const handleToggleLock = async () => {
+        const action = myTeam.is_locked ? 'unlock' : 'lock';
+        if (!(await confirmToast(`${action === 'lock' ? 'Lock' : 'Unlock'} the roster? ${action === 'lock' ? 'Members won\'t be able to join or leave.' : 'Members will be able to join and leave freely.'}`))) return;
+        try {
+            const { error } = await supabase.rpc(`${action}_roster`, { p_roster_id: myTeam.id });
+            if (error) throw error;
+            setMyTeam((prev: any) => ({ ...prev, is_locked: !prev.is_locked }));
+            toast.success(`Roster ${action}ed.`);
+        } catch (err: any) {
+            toast.error(`Failed to ${action} roster: ` + err.message);
+        }
+    };
+
+    // Derived data
+    const isCaptain = myTeam?.captain_id === user?.id;
+    const isLocked = myTeam?.is_locked || false;
+    const players = teamMembers.filter(m => m.role === 'player');
+    const subs = teamMembers.filter(m => m.role === 'sub');
 
     return (
         <div className="min-h-screen bg-[#050b14] text-white p-6 pb-20 overflow-x-hidden relative animate-fade-in font-sans selection:bg-purple-500/30">
@@ -360,6 +432,16 @@ export const TeamHub = () => {
                 ) : (
                     // VIEW B: HAS TEAM
                     <div className="glass bg-[#0a101f]/90 rounded-[2.5rem] border border-white/10 overflow-hidden shadow-2xl relative">
+                        
+                        {/* Roster Locked Banner */}
+                        {isLocked && (
+                            <div className="bg-gradient-to-r from-amber-900/30 via-red-900/30 to-amber-900/30 border-b border-amber-500/20 px-6 py-3 flex items-center justify-center gap-3 animate-fade-in">
+                                <Lock size={14} className="text-amber-500" />
+                                <span className="text-amber-400 text-xs font-black uppercase tracking-[0.2em]">Roster Locked — Tournament Active</span>
+                                <Lock size={14} className="text-amber-500" />
+                            </div>
+                        )}
+
                         {/* Team Header */}
                         <div className="bg-gradient-to-r from-emerald-900/40 via-cyan-900/40 to-[#0a101f] p-8 md:p-12 border-b border-white/10 relative">
                              <div className="absolute top-0 right-0 p-12 opacity-5 pointer-events-none">
@@ -377,82 +459,225 @@ export const TeamHub = () => {
                                     [{myTeam.tag}]
                                 </div>
 
-                                {myTeam.captain_id === user.id && (
-                                    <div className="bg-black/40 backdrop-blur-sm rounded-xl p-4 border border-white/10 inline-flex flex-col gap-2 max-w-sm">
-                                        <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Invite Code</div>
-                                        <button 
-                                            onClick={copyInviteCode}
-                                            className="flex items-center gap-4 text-xl font-mono text-cyan-400 hover:text-white transition-colors group"
+                                <div className="flex flex-wrap items-center gap-4">
+                                    {isCaptain && (
+                                        <div className="bg-black/40 backdrop-blur-sm rounded-xl p-4 border border-white/10 inline-flex flex-col gap-2 max-w-sm">
+                                            <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Invite Code</div>
+                                            <button 
+                                                onClick={copyInviteCode}
+                                                className="flex items-center gap-4 text-xl font-mono text-cyan-400 hover:text-white transition-colors group"
+                                            >
+                                                <span className="tracking-[0.2em]">{myTeam.invite_code}</span>
+                                                {copyFeedback ? <Check size={18} className="text-green-500"/> : <Copy size={18} className="opacity-50 group-hover:opacity-100"/>}
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {/* Lock/Unlock Toggle (Captain only) */}
+                                    {isCaptain && (
+                                        <button
+                                            onClick={handleToggleLock}
+                                            className={`flex items-center gap-2 px-5 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all border ${
+                                                isLocked 
+                                                    ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border-amber-500/30 hover:border-amber-500/60' 
+                                                    : 'bg-slate-800/50 hover:bg-slate-700/50 text-slate-400 border-white/10 hover:border-white/20'
+                                            }`}
                                         >
-                                            <span className="tracking-[0.2em]">{myTeam.invite_code}</span>
-                                            {copyFeedback ? <Check size={18} className="text-green-500"/> : <Copy size={18} className="opacity-50 group-hover:opacity-100"/>}
+                                            {isLocked ? <><Unlock size={14} /> Unlock Roster</> : <><Lock size={14} /> Lock Roster</>}
                                         </button>
-                                    </div>
-                                )}
+                                    )}
+                                </div>
                             </div>
                         </div>
 
                         {/* Members List */}
-                        <div className="p-8 md:p-12">
-                            <h3 className="text-slate-400 text-sm font-bold uppercase tracking-widest mb-6 flex items-center gap-2">
-                                <Users size={16} /> Operatives ({teamMembers.length})
-                            </h3>
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {teamMembers.map((member, idx) => {
-                                    const isCaptain = member.user_id === myTeam.captain_id;
-                                    const isMe = member.user_id === user.id;
-                                    // Use joined profile data
-                                    const displayName = member.profiles?.username || (isMe ? 'YOU' : `OPERATIVE ${idx + 1}`);
-                                    
-                                    return (
-                                        <div key={member.user_id} className="bg-white/5 border border-white/5 rounded-2xl p-4 flex items-center justify-between group hover:bg-white/10 transition-colors">
-                                            <div className="flex items-center gap-3">
-                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${isCaptain ? 'bg-yellow-500/20 text-yellow-500 border border-yellow-500/30' : 'bg-slate-700/50 text-slate-400'}`}>
-                                                    {isCaptain ? <Crown size={18} /> : <Users size={18} />}
-                                                </div>
-                                                <div>
-                                                    <div className="font-bold text-white flex items-center gap-2">
-                                                        {displayName}
-                                                        {/* Placeholder for name since we lack public profile table */}
-                                                        {isCaptain && <span className="text-[10px] bg-yellow-500/20 text-yellow-500 px-1.5 rounded border border-yellow-500/20">CPT</span>}
+                        <div className="p-8 md:p-12 space-y-8">
+                            {/* PLAYERS SECTION */}
+                            <div>
+                                <h3 className="text-slate-400 text-sm font-bold uppercase tracking-widest mb-6 flex items-center gap-2">
+                                    <Users size={16} /> Active Players ({players.length}/3)
+                                </h3>
+                                
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {players.map((member) => {
+                                        const memberIsCaptain = member.user_id === myTeam.captain_id;
+                                        const isMe = member.user_id === user.id;
+                                        const displayName = member.profiles?.username || (isMe ? 'YOU' : `OPERATIVE`);
+                                        const isSwapSource = subSwapSource === member.user_id;
+                                        
+                                        return (
+                                            <div key={member.user_id} className={`bg-white/5 border rounded-2xl p-4 flex items-center justify-between group hover:bg-white/10 transition-all ${isSwapSource ? 'border-amber-500/50 bg-amber-500/5 ring-1 ring-amber-500/30' : 'border-white/5'}`}>
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${memberIsCaptain ? 'bg-yellow-500/20 text-yellow-500 border border-yellow-500/30' : 'bg-slate-700/50 text-slate-400'}`}>
+                                                        {memberIsCaptain ? <Crown size={18} /> : <Users size={18} />}
                                                     </div>
-                                                    <div className="text-[10px] font-mono text-slate-600 uppercase">ID: {member.user_id.slice(0, 8)}...</div>
+                                                    <div>
+                                                        <div className="font-bold text-white flex items-center gap-2">
+                                                            {displayName}
+                                                            {memberIsCaptain && <span className="text-[10px] bg-yellow-500/20 text-yellow-500 px-1.5 rounded border border-yellow-500/20">CPT</span>}
+                                                            {isMe && <span className="text-[10px] bg-blue-500/20 text-blue-400 px-1.5 rounded border border-blue-500/20">YOU</span>}
+                                                        </div>
+                                                        <div className="text-[10px] font-mono text-slate-600 uppercase">ID: {member.user_id.slice(0, 8)}...</div>
+                                                    </div>
+                                                </div>
+
+                                                {/* Actions */}
+                                                <div className="flex items-center gap-2">
+                                                    {/* Swap button (captain only, only when locked and subs exist) */}
+                                                    {isCaptain && isLocked && subs.length > 0 && (
+                                                        <button 
+                                                            onClick={() => setSubSwapSource(isSwapSource ? null : member.user_id)}
+                                                            className={`p-2 rounded-lg transition-all ${isSwapSource ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'text-slate-500 hover:text-amber-400 hover:bg-amber-500/10'}`}
+                                                            title="Substitute this player"
+                                                        >
+                                                            <ArrowRightLeft size={16} />
+                                                        </button>
+                                                    )}
+
+                                                    {/* Kick button (captain only, not locked, not self) */}
+                                                    {isCaptain && !isLocked && !memberIsCaptain && (
+                                                        <button 
+                                                            onClick={() => handleKickMember(member.user_id)}
+                                                            className="p-2 text-red-500/50 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                                                            title="Kick Operative"
+                                                        >
+                                                            <X size={18} />
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
 
-                                            {/* Actions */}
-                                            {myTeam.captain_id === user.id && !isCaptain && (
-                                                <button 
-                                                    onClick={() => handleKickMember(member.user_id)}
-                                                    className="p-2 text-red-500/50 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
-                                                    title="Kick Operative"
+                            {/* SWAP TARGET SELECTOR (shown when subSwapSource is set) */}
+                            {subSwapSource && subs.length > 0 && (
+                                <div className="bg-amber-500/5 border border-amber-500/20 rounded-2xl p-6 animate-fade-in">
+                                    <div className="flex items-center gap-2 text-amber-400 text-xs font-black uppercase tracking-widest mb-4">
+                                        <ArrowRightLeft size={14} /> Select Substitute To Swap In
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        {subs.map(sub => {
+                                            const subName = sub.profiles?.username || 'Sub';
+                                            return (
+                                                <button
+                                                    key={sub.user_id}
+                                                    onClick={() => handleSubstitute(subSwapSource, sub.user_id)}
+                                                    className="flex items-center gap-3 p-3 bg-black/40 border border-amber-500/20 hover:border-amber-500/60 rounded-xl transition-all hover:bg-amber-500/10 group text-left"
                                                 >
-                                                    <X size={18} />
+                                                    <div className="w-8 h-8 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 group-hover:bg-amber-500/20 transition-colors">
+                                                        <UserPlus size={14} />
+                                                    </div>
+                                                    <div>
+                                                        <div className="font-bold text-white text-sm">{subName}</div>
+                                                        <div className="text-[10px] text-slate-500 font-mono">Swap in as active player</div>
+                                                    </div>
                                                 </button>
-                                            )}
-                                        </div>
-                                    );
-                                })}
+                                            );
+                                        })}
+                                    </div>
+                                    <button onClick={() => setSubSwapSource(null)} className="mt-3 text-xs text-slate-500 hover:text-white font-bold uppercase tracking-widest transition-colors">Cancel</button>
+                                </div>
+                            )}
+
+                            {/* SUBS SECTION */}
+                            <div className="pt-6 border-t border-white/5">
+                                <h3 className="text-slate-400 text-sm font-bold uppercase tracking-widest mb-6 flex items-center gap-2">
+                                    <UserMinus size={16} className="text-amber-500" /> Substitutes ({subs.length}/2)
+                                </h3>
+
+                                {subs.length === 0 ? (
+                                    <div className="text-center py-6 border border-dashed border-white/10 rounded-2xl bg-black/20">
+                                        <p className="text-slate-600 text-xs font-bold uppercase tracking-widest">No substitutes registered</p>
+                                    </div>
+                                ) : (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        {subs.map((member) => {
+                                            const memberIsCaptain = member.user_id === myTeam.captain_id;
+                                            const isMe = member.user_id === user.id;
+                                            const displayName = member.profiles?.username || (isMe ? 'YOU' : `SUBSTITUTE`);
+
+                                            return (
+                                                <div key={member.user_id} className="bg-amber-500/5 border border-amber-500/10 rounded-2xl p-4 flex items-center justify-between group hover:border-amber-500/30 transition-colors">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-10 h-10 rounded-full flex items-center justify-center bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                                                            <UserMinus size={16} />
+                                                        </div>
+                                                        <div>
+                                                            <div className="font-bold text-white flex items-center gap-2">
+                                                                {displayName}
+                                                                <span className="text-[10px] bg-amber-500/20 text-amber-400 px-1.5 rounded border border-amber-500/20">SUB</span>
+                                                                {memberIsCaptain && <span className="text-[10px] bg-yellow-500/20 text-yellow-500 px-1.5 rounded border border-yellow-500/20">CPT</span>}
+                                                                {isMe && <span className="text-[10px] bg-blue-500/20 text-blue-400 px-1.5 rounded border border-blue-500/20">YOU</span>}
+                                                            </div>
+                                                            <div className="text-[10px] font-mono text-slate-600 uppercase">ID: {member.user_id.slice(0, 8)}...</div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="flex items-center gap-2">
+                                                        {/* Promote sub to player (captain only, when < 3 players) */}
+                                                        {isCaptain && players.length < 3 && (
+                                                            <button 
+                                                                onClick={() => handlePromoteSub(member.user_id)}
+                                                                className="p-2 text-emerald-500/50 hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all"
+                                                                title="Promote to active player"
+                                                            >
+                                                                <ChevronUp size={18} />
+                                                            </button>
+                                                        )}
+                                                        {/* Kick sub (captain only, only when NOT locked) */}
+                                                        {isCaptain && !isLocked && (
+                                                            <button 
+                                                                onClick={() => handleKickMember(member.user_id)}
+                                                                className="p-2 text-red-500/50 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                                                                title="Remove Substitute"
+                                                            >
+                                                                <X size={18} />
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+
+                                {/* Info about adding subs via invite code */}
+                                {subs.length < 2 && (
+                                    <div className="mt-4 flex items-center gap-2 text-[10px] text-slate-600 font-bold uppercase tracking-widest">
+                                        <UserPlus size={12} className="text-slate-500" />
+                                        Subs join using the same invite code — auto-assigned when roster has 3 players
+                                    </div>
+                                )}
                             </div>
 
                             {/* Footer Actions */}
                             <div className="mt-12 pt-8 border-t border-white/5 flex flex-wrap gap-4">
-                                {myTeam.captain_id === user.id ? (
-                                    <button 
-                                        onClick={handleDisbandTeam}
-                                        className="flex items-center gap-2 px-6 py-3 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 rounded-xl font-bold uppercase text-xs tracking-widest transition-all ml-auto"
-                                    >
-                                        <Trash2 size={16} /> Disband Unit
-                                    </button>
-                                ) : (
-                                    <button 
-                                        onClick={handleLeaveTeam}
-                                        className="flex items-center gap-2 px-6 py-3 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 rounded-xl font-bold uppercase text-xs tracking-widest transition-all ml-auto"
-                                    >
-                                        <LogOut size={16} /> Leave Unit
-                                    </button>
+                                {isLocked && (
+                                    <div className="flex items-center gap-2 text-amber-500/60 text-xs font-bold uppercase tracking-widest">
+                                        <AlertTriangle size={14} /> Roster changes restricted during tournament
+                                    </div>
                                 )}
+                                <div className="ml-auto flex gap-3">
+                                    {isCaptain ? (
+                                        <button 
+                                            onClick={handleDisbandTeam}
+                                            disabled={isLocked}
+                                            className={`flex items-center gap-2 px-6 py-3 bg-red-500/10 border border-red-500/20 rounded-xl font-bold uppercase text-xs tracking-widest transition-all ${isLocked ? 'opacity-30 cursor-not-allowed text-red-500/50' : 'hover:bg-red-500/20 text-red-500'}`}
+                                        >
+                                            <Trash2 size={16} /> Disband Unit
+                                        </button>
+                                    ) : (
+                                        <button 
+                                            onClick={handleLeaveTeam}
+                                            disabled={isLocked}
+                                            className={`flex items-center gap-2 px-6 py-3 bg-red-500/10 border border-red-500/20 rounded-xl font-bold uppercase text-xs tracking-widest transition-all ${isLocked ? 'opacity-30 cursor-not-allowed text-red-500/50' : 'hover:bg-red-500/20 text-red-500'}`}
+                                        >
+                                            <LogOut size={16} /> Leave Unit
+                                        </button>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     </div>
