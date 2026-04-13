@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { ArrowLeft, Shield, Users, Crown, UserPlus, LogOut, Trash2, Copy, Check, X, Lock, Unlock, ArrowRightLeft, UserMinus, AlertTriangle, ChevronUp } from 'lucide-react';
+import { ArrowLeft, Shield, Users, Crown, UserPlus, LogOut, Trash2, Copy, Check, X, Lock, Unlock, ArrowRightLeft, UserMinus, AlertTriangle, ChevronUp, ChevronDown } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { confirmToast } from '../utils/confirmToast';
 
@@ -314,6 +314,23 @@ export const TeamHub = () => {
         }
     };
 
+    const handleDemotePlayer = async (playerUserId: string) => {
+        const playerMember = teamMembers.find(m => m.user_id === playerUserId);
+        const playerName = playerMember?.profiles?.username || 'Player';
+        if (!(await confirmToast(`Demote ${playerName} to substitute?`))) return;
+        try {
+            const { error } = await supabase.rpc('demote_player', {
+                p_roster_id: myTeam.id,
+                p_player_user_id: playerUserId,
+            });
+            if (error) throw error;
+            toast.success(`${playerName} demoted to substitute!`);
+            fetchTeamMembers(myTeam.id);
+        } catch (err: any) {
+            toast.error('Demotion failed: ' + err.message);
+        }
+    };
+
     const handleToggleLock = async () => {
         const action = myTeam.is_locked ? 'unlock' : 'lock';
         if (!(await confirmToast(`${action === 'lock' ? 'Lock' : 'Unlock'} the roster? ${action === 'lock' ? 'Members won\'t be able to join or leave.' : 'Members will be able to join and leave freely.'}`))) return;
@@ -523,14 +540,25 @@ export const TeamHub = () => {
 
                                                 {/* Actions */}
                                                 <div className="flex items-center gap-2">
-                                                    {/* Swap button (captain only, only when locked and subs exist) */}
-                                                    {isCaptain && isLocked && subs.length > 0 && (
+                                                    {/* Swap button (captain only, when subs exist) */}
+                                                    {isCaptain && subs.length > 0 && (
                                                         <button 
                                                             onClick={() => setSubSwapSource(isSwapSource ? null : member.user_id)}
                                                             className={`p-2 rounded-lg transition-all ${isSwapSource ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'text-slate-500 hover:text-amber-400 hover:bg-amber-500/10'}`}
                                                             title="Substitute this player"
                                                         >
                                                             <ArrowRightLeft size={16} />
+                                                        </button>
+                                                    )}
+
+                                                    {/* Demote player to sub (captain only, when > 1 player and < 2 subs) */}
+                                                    {isCaptain && players.length > 1 && subs.length < 2 && (
+                                                        <button 
+                                                            onClick={() => handleDemotePlayer(member.user_id)}
+                                                            className="p-2 text-amber-500/50 hover:text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all"
+                                                            title="Demote to substitute"
+                                                        >
+                                                            <ChevronDown size={18} />
                                                         </button>
                                                     )}
 
