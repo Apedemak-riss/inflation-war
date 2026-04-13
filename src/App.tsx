@@ -1498,11 +1498,13 @@ function AppContent() {
                     </div>
                 </div>
                 
-                <h1 className="text-4xl lg:text-6xl font-black mb-2 tracking-tighter text-white drop-shadow-2xl text-center">
-                    INFLATION<br/>
-                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 text-glow">WAR</span>
+                <h1 className="text-4xl md:text-5xl lg:text-6xl font-black mb-1 tracking-tighter text-white drop-shadow-2xl text-center leading-none">
+                    CLASH ELITE<br className="md:hidden"/> NETWORK
                 </h1>
-                <p className="text-blue-200/60 font-medium tracking-[0.4em] text-[10px] uppercase border-y border-white/5 py-2 px-8">Tactical Economy Simulator</p>
+                <h2 className="text-2xl md:text-3xl font-black mb-4 tracking-tighter text-center">
+                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 text-glow uppercase">Inflation War</span>
+                </h2>
+                <p className="text-blue-200/60 font-medium tracking-[0.3em] md:tracking-[0.4em] text-[9px] md:text-[10px] uppercase border-y border-white/5 py-2 px-4 md:px-8 text-center">Tactical Economy Simulator</p>
           </div>
           
           {/* 2. Body (Two Columns, Middle) */}
